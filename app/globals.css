@@ -17,3 +17,72 @@
   --color-error: #EF4444;
   --color-locked: #99A1AF;
 }
+
+@layer clerk {
+  .cl-card {
+    background: #ffffff !important;
+    border: 1px solid #e7eaf3 !important;
+    box-shadow: none !important;
+  }
+
+  .cl-headerTitle,
+  .cl-formFieldLabel,
+  .cl-identityPreviewText,
+  .cl-formFieldSuccessText,
+  .cl-formFieldWarningText,
+  .cl-navbarTitle {
+    color: #101828 !important;
+  }
+
+  .cl-headerSubtitle,
+  .cl-footerActionText,
+  .cl-dividerText {
+    color: #6a7282 !important;
+  }
+
+  .cl-formFieldInput,
+  .cl-otpCodeFieldInput {
+    background: #f9fafb !important;
+    color: #101828 !important;
+    border-color: #e7eaf3 !important;
+  }
+
+  .cl-formFieldInput::placeholder {
+    color: #99a1af !important;
+  }
+
+  .cl-formButtonPrimary {
+    background: #7c5cfc !important;
+    color: #ffffff !important;
+    box-shadow: none !important;
+  }
+
+  .cl-socialButtonsBlockButton {
+    background: #ffffff !important;
+    color: #101828 !important;
+    border: 1px solid #e7eaf3 !important;
+    box-shadow: none !important;
+  }
+
+  .cl-socialButtonsBlockButton:hover {
+    background: #f9fafb !important;
+  }
+
+  .cl-socialButtonsBlockButtonText {
+    color: #101828 !important;
+  }
+
+  .cl-socialButtonsProviderIcon {
+    opacity: 1 !important;
+  }
+
+  .cl-footerActionLink,
+  .cl-formResendCodeLink,
+  .cl-identityPreviewEditButton {
+    color: #7c5cfc !important;
+  }
+
+  .cl-dividerLine {
+    background: #e7eaf3 !important;
+  }
+}
