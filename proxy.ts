@@ -1,18 +1,10 @@
 import { clerkMiddleware } from "@clerk/nextjs/server";
-import createMiddleware from "next-intl/middleware";
-import { routing } from "./i18n/routing";
 
-const handleI18nRouting = createMiddleware(routing);
-
-export default clerkMiddleware(async (_auth, req) => {
-  return handleI18nRouting(req);
-});
+export default clerkMiddleware();
 
 export const config = {
   matcher: [
-    "/",
-    "/(ar|en)/:path*",
-    "/((?!_next|_vercel|.*\\..*).*)",
+    "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
     "/(api|trpc)(.*)",
   ],
 };

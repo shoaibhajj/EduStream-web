@@ -20,5 +20,12 @@
       "brand": "Moallem Academy",
       "tagline": "An Arabic-first learning experience with a clean foundation for student, teacher, and admin roles."
     }
+  },
+  "DbCheck": {
+    "title": "Database Check",
+    "success": "Database connection is working",
+    "error": "Could not load data",
+    "empty": "No academic years yet",
+    "yearsHeading": "Available academic years"
   }
 }

@@ -1538,3 +1538,645 @@ This feature made directionality part of the core page structure from the beginn
 - Locale files should keep expanding instead of reintroducing hardcoded strings
 - Shared shell components for student, teacher, and admin areas should build on the same locale-aware structure
 - UI polish can continue later without changing the auth or localization foundation
+
+
+---
+
+
+## Feature 03 — Configure Database Foundation (Neon + Prisma)
+
+
+### Goal
+
+
+Set up the real database foundation for **Moallem Academy** using:
+
+
+- Neon PostgreSQL
+- Prisma ORM
+- production-minded server-only database access
+- initial shared entity direction
+- localized proof-query path direction
+- architecture that stays compatible with future Clerk-based user alignment
+
+
+This feature is about the **real database foundation**, not full schema expansion or full product flows.
+
+
+---
+
+
+## Important implementation change
+
+
+This feature was originally planned as a **Supabase database foundation** feature.  
+During implementation, the database direction was intentionally changed to **Neon + Prisma** instead.
+
+
+So for Feature 03:
+- Supabase database connection work was abandoned
+- Neon became the active database provider
+- Prisma became the server-side database access layer
+- old Supabase-specific database helper direction should be treated as outdated for the web project unless future architecture decisions reverse this
+
+
+---
+
+
+## Decisions used for this feature
+
+
+- Database provider: **Neon**
+- ORM: **Prisma**
+- Prisma client output: `lib/generated/prisma`
+- Runtime connection uses `DATABASE_URL`
+- Prisma CLI/config uses `prisma.config.ts`
+- Initial database foundation stays intentionally small:
+  - `profiles`
+  - `academic_years`
+  - `subjects`
+- Clerk remains the identity/auth source of truth
+- `profiles` remains the app-level user/profile table direction
+- Database access must stay server-only
+- No Neon credentials should ever be exposed through `NEXT_PUBLIC_*` variables
+
+
+---
+
+
+## Step 1 — Remove or stop using the old Supabase database path
+
+
+### What changed
+
+
+The original Supabase connection flow was abandoned in practice and the active database foundation moved to Neon instead.
+
+
+### Why this matters
+
+
+Feature 03 had to be unblocked with a real working database path.  
+Neon + Prisma became the practical working path for this web implementation.
+
+
+### Notes
+
+
+Any old files or markdown references that still describe Supabase as the current web database foundation should be updated later to match the new Neon-based implementation direction.
+
+
+---
+
+
+## Step 2 — Install Prisma and Neon database dependencies
+
+
+### Command
+
+
+```bash
+npm uninstall @supabase/ssr @supabase/supabase-js
+npm install @prisma/client @prisma/adapter-neon @neondatabase/serverless
+npm install -D prisma dotenv tsx
+```
+
+
+### Why this matters
+
+
+These packages are the real foundation for:
+- Prisma schema management
+- Neon database connectivity
+- server-side database access
+- TypeScript seed execution
+
+
+### Verify
+
+
+```bash
+npm ls @prisma/client
+npm ls @prisma/adapter-neon
+npm ls @neondatabase/serverless
+```
+
+
+---
+
+
+## Step 3 — Configure environment variables for Neon
+
+
+### File to update
+
+
+`.env.local`
+
+
+### Code
+
+
+```env
+# Neon database
+DATABASE_URL="postgresql://<user>:<password>@<pooled-host>/<database>?sslmode=require&channel_binding=require"
+DIRECT_URL="postgresql://<user>:<password>@<direct-host>/<database>?sslmode=require&channel_binding=require"
+```
+
+
+### Why this matters
+
+
+The app needs real server-side database access from the foundation stage.  
+Credentials must stay private and must never be exposed through public env variables.
+
+
+### Important note
+
+
+During implementation, direct connections were unreliable on the active machine/network, so the working Prisma path was ultimately adjusted around the connection that successfully worked in local development.
+
+
+---
+
+
+## Step 4 — Create Prisma config
+
+
+### File to create/update
+
+
+`prisma.config.ts`
+
+
+### Code
+
+
+```ts
+import "dotenv/config";
+import { defineConfig, env } from "prisma/config";
+
+
+export default defineConfig({
+  schema: "prisma/schema.prisma",
+  migrations: {
+    seed: "tsx prisma/seed.ts",
+  },
+  datasource: {
+    url: env("DATABASE_URL"),
+  },
+});
+```
+
+
+### Why this matters
+
+
+Prisma 7 uses `prisma.config.ts` as the active configuration source.  
+This centralizes:
+- schema location
+- seed command
+- datasource URL
+
+
+---
+
+
+## Step 5 — Create the initial Prisma schema
+
+
+### File to create
+
+
+`prisma/schema.prisma`
+
+
+### Code
+
+
+```prisma
+generator client {
+  provider = "prisma-client-js"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum AppRole {
+  student
+  teacher
+  admin
+}
+
+model Profile {
+  id          String   @id @default(cuid())
+  clerkUserId String   @unique @map("clerk_user_id")
+  role        AppRole  @default(student)
+  displayName String?  @map("display_name")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("profiles")
+}
+
+model AcademicYear {
+  id        String    @id @default(cuid())
+  nameAr    String    @map("name_ar")
+  nameEn    String?   @map("name_en")
+  sortOrder Int       @default(0) @map("sort_order")
+  isActive  Boolean   @default(true) @map("is_active")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  subjects  Subject[]
+
+  @@map("academic_years")
+}
+
+model Subject {
+  id             String       @id @default(cuid())
+  academicYearId String       @map("academic_year_id")
+  nameAr         String       @map("name_ar")
+  nameEn         String?      @map("name_en")
+  sortOrder      Int          @default(0) @map("sort_order")
+  isActive       Boolean      @default(true) @map("is_active")
+  createdAt      DateTime     @default(now()) @map("created_at")
+
+  academicYear   AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+
+  @@index([academicYearId])
+  @@map("subjects")
+}
+```
+
+
+### Why this matters
+
+
+This creates the first controlled schema direction without overbuilding the full product.  
+These three tables cover:
+- app-level user/profile alignment
+- the first browse hierarchy
+- future mobile/web shared entity modeling direction
+
+
+---
+
+
+## Step 6 — Validate and generate Prisma client
+
+
+### Command
+
+
+```bash
+npx prisma validate
+npx prisma generate
+```
+
+
+### Why this matters
+
+
+This confirms the schema is valid and generates the Prisma client into the app codebase for real server-side use.
+
+
+### Verify
+
+
+You should see Prisma generate successfully into:
+
+
+```bash
+lib/generated/prisma
+```
+
+
+---
+
+
+## Step 7 — Push the schema to Neon
+
+
+### Command
+
+
+```bash
+npx prisma db push
+```
+
+
+### Why this matters
+
+
+This creates the actual database tables in Neon from the Prisma schema.  
+After push, the first three tables should exist in the real database:
+- `profiles`
+- `academic_years`
+- `subjects`
+
+
+### Verify
+
+
+Open Neon and confirm those tables exist in the database browser.
+
+
+---
+
+
+## Step 8 — Add a seed file for minimal real data
+
+
+### File to create
+
+
+`prisma/seed.ts`
+
+
+### Code
+
+
+```ts
+import { PrismaClient } from "../lib/generated/prisma";
+import { PrismaNeon } from "@prisma/adapter-neon";
+
+const adapter = new PrismaNeon({
+  connectionString: process.env.DATABASE_URL!,
+});
+
+const prisma = new PrismaClient({ adapter });
+
+async function main() {
+  const year = await prisma.academicYear.upsert({
+    where: { id: "foundation-year-2025" },
+    update: {},
+    create: {
+      id: "foundation-year-2025",
+      nameAr: "الصف التأسيسي",
+      nameEn: "Foundation Year",
+      sortOrder: 1,
+      isActive: true,
+    },
+  });
+
+  await prisma.subject.upsert({
+    where: { id: "foundation-math" },
+    update: {},
+    create: {
+      id: "foundation-math",
+      academicYearId: year.id,
+      nameAr: "الرياضيات",
+      nameEn: "Mathematics",
+      sortOrder: 1,
+      isActive: true,
+    },
+  });
+}
+
+main()
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });
+```
+
+
+### Why this matters
+
+
+This seeds a small amount of real database content for verification without turning the app into a mock-data-first implementation.
+
+
+---
+
+
+## Step 9 — Run the database seed
+
+
+### Command
+
+
+```bash
+npx prisma db seed
+```
+
+
+### Why this matters
+
+
+This inserts minimal initial data into the real Neon database so the first proof query path can return actual rows.
+
+
+### Verify
+
+
+In Neon, confirm that:
+- one `academic_years` row exists
+- one `subjects` row exists and links to that academic year
+
+
+---
+
+
+## Step 10 — Create the server-only Prisma helper
+
+
+### File to create
+
+
+`lib/prisma.ts`
+
+
+### Code
+
+
+```ts
+import "server-only";
+import { PrismaClient } from "@/lib/generated/prisma";
+import { PrismaNeon } from "@prisma/adapter-neon";
+
+const globalForPrisma = globalThis as unknown as {
+  prisma?: PrismaClient;
+};
+
+const adapter = new PrismaNeon({
+  connectionString: process.env.DATABASE_URL!,
+});
+
+export const prisma =
+  globalForPrisma.prisma ??
+  new PrismaClient({
+    adapter,
+  });
+
+if (process.env.NODE_ENV !== "production") {
+  globalForPrisma.prisma = prisma;
+}
+```
+
+
+### Why this matters
+
+
+This gives the app one clean, reusable, production-minded database entry point.  
+The `server-only` import protects the project from accidentally using Prisma in client-side code.
+
+
+---
+
+
+## Step 11 — Prepare the localized proof-query route direction
+
+
+### Planned route
+
+
+`app/[locale]/(student)/db-check/page.tsx`
+
+
+### Intended purpose
+
+
+- query `academic_years`
+- confirm real database reads work inside the app
+- keep all visible strings localized through locale message files
+
+
+### Why this matters
+
+
+Feature 03 should end with at least one real query path, not only schema setup.  
+The proof route direction was defined here as part of the database foundation track.
+
+
+---
+
+
+## Step 12 — Define Clerk ↔ app user alignment
+
+
+### Direction used
+
+
+- Clerk is the source of truth for authentication identity
+- `profiles` is the app-level source of truth for role-ready user metadata
+- future server-side flows should read Clerk `userId` first, then find the matching `profiles.clerkUserId` row
+
+
+### Why this matters
+
+
+This avoids identity mismatch later and keeps auth concerns separate from app-specific profile modeling.
+
+
+---
+
+
+## Step 13 — Define the secure database baseline
+
+
+### Rules used
+
+
+- Neon credentials stay server-only
+- Prisma must only be used from the server
+- No database secrets go into `NEXT_PUBLIC_*`
+- Browser code must never connect to Neon directly
+- Prisma is the web app’s database access layer
+
+
+### Why this matters
+
+
+This establishes a minimum production-minded safety baseline for Feature 03 without overbuilding authorization logic too early.
+
+
+---
+
+
+## Step 14 — Local verification used for this feature
+
+
+### Commands
+
+
+```bash
+npx prisma validate
+npx prisma generate
+npx prisma db push
+npx prisma db seed
+npm run dev
+```
+
+
+### What to verify
+
+
+- Prisma schema validates successfully
+- Prisma client generates into `lib/generated/prisma`
+- Neon contains:
+  - `profiles`
+  - `academic_years`
+  - `subjects`
+- seed data exists in Neon
+- the app can now use `lib/prisma.ts` as the server-side database entry point
+- no Neon secrets appear in client-side code
+
+
+---
+
+
+## Step 15 — Commit the database foundation
+
+
+### Command
+
+
+```bash
+git add .
+git commit -m "feat(03): configure neon prisma database foundation"
+git push origin main
+```
+
+
+### Why this matters
+
+
+This saves the first real database foundation for the web app using the actual backend path chosen during implementation.
+
+
+---
+
+
+## Feature 03 completion checklist
+
+
+- [x] Supabase database path was abandoned in favor of Neon
+- [x] Neon environment configuration was added
+- [x] Prisma config was established
+- [x] Initial schema was created for `profiles`, `academic_years`, and `subjects`
+- [x] Prisma client generation is working
+- [x] Schema was pushed to Neon
+- [x] Minimal seed flow was added
+- [x] Server-only Prisma entry point was added
+- [x] Clerk-to-profile alignment direction was defined
+- [x] Database secrets remain server-only
+- [x] Foundation stayed focused without overbuilding the full product schema
+
+
+---
+
+
+## Notes for future features
+
+
+- Any old Supabase-specific markdown or architecture references should be updated to match the active Neon + Prisma direction
+- Feature 05 should use the seeded `academic_years` and `subjects` structure as the first real browse path
+- The `profiles` table should later be connected to Clerk-driven creation/sync flows
+- More tables should only be added when the next product flow truly requires them
+- Visible database-driven UI text must continue to live in locale message files instead of being hardcoded
