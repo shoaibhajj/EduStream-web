@@ -5,10 +5,10 @@ Repo: [https://github.com/shoaibhajj/EduStream-web.git](https://github.com/shoai
 Update this file after each completed feature.
 
 ## Current Status
-Phase: Ready to start
-Current Goal: Begin the real web app foundation with Next.js, Clerk, Supabase, Cloudinary-aware media planning, and shared mobile/web product alignment
-Last completed: None yet
-Next up: 01 — Establish Real Web Foundation
+Phase: Phase 1 — Real Web Foundation
+Current Goal: Continue the real web platform by adding the Supabase database foundation on top of the completed Next.js, Clerk, localization, and app-shell groundwork
+Last completed: 04 — Establish RTL, Localization, and App Shell Foundation
+Next up: 03 — Configure Supabase Database Foundation
 
 ## Required First Read
 Before starting any feature, the AI agent must read these 8 files from the repo first:
@@ -41,10 +41,10 @@ Do not start implementation before reading all 8 files.
 ## Progress
 
 ### Phase 1 — Real Web Foundation
-- [ ] 01 — Establish Real Web Foundation
-- [ ] 02 — Configure Clerk Authentication Foundation
+- [x] 01 — Establish Real Web Foundation
+- [x] 02 — Configure Clerk Authentication Foundation
 - [ ] 03 — Configure Supabase Database Foundation
-- [ ] 04 — Establish RTL, Localization, and App Shell Foundation
+- [x] 04 — Establish RTL, Localization, and App Shell Foundation
 
 ### Phase 2 — Core Product Flows
 - [ ] 05 — Student Browse and Course Discovery Flow
@@ -64,7 +64,7 @@ Do not start implementation before reading all 8 files.
 - [ ] 15 — Deployment and Environment Readiness
 
 ## In Progress
-- None yet.
+- 03 — Configure Supabase Database Foundation
 
 ## Open Questions
 - Confirm exact admin/staff permissions for enrollment override, access confirmation, and content moderation.
@@ -80,6 +80,9 @@ Do not start implementation before reading all 8 files.
 - `mobile-app-change-handoff.md` is part of required context for all web features.
 - Media handling must support both uploaded assets and externally linked content.
 - Cloudinary-aware media architecture should be treated as a product-level decision, not just a UI detail.
+- Clerk is now wired into the real App Router foundation with localized auth routes and production-minded session awareness.
+- Localization is established early with Arabic as the default locale, English as the secondary locale, and RTL preserved as a first-class requirement.
+- Auth and localization decisions should remain compatible with future mobile role handling and shared user identity flows.
 
 ## Session Notes
 - Mobile side is now stable enough to begin web implementation.
@@ -88,3 +91,6 @@ Do not start implementation before reading all 8 files.
 - Mobile has a working Android APK build confirmed on a real device.
 - Mobile Feature 15 remains in progress as a UI-polish/design-system refinement track.
 - Web should begin with real infrastructure and shared product alignment, not mock/demo flows.
+- Feature 01 established the real Next.js web foundation for Moallem Academy.
+- Feature 02 completed Clerk authentication foundations with root integration, localized sign-in/sign-up routing, session-aware UI, and a cleaner role-ready auth base.
+- Feature 04 was completed alongside auth work to establish locale routing, Arabic-first structure, English secondary support, and RTL-aware app-shell direction from the start.

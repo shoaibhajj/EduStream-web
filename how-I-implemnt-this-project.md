@@ -614,3 +614,927 @@ This saves the full real foundation as the first implementation feature for the 
 - Supabase schema and real table reads/writes will expand in later features
 - Localization files and full i18n structure can be added in the RTL/localization feature
 - Cloudinary upload implementation should come later, but the architecture direction is already prepared
+
+
+------
+
+
+---
+
+## Feature 02 — Configure Clerk Authentication Foundation
+
+### Goal
+
+Set up the real Clerk authentication layer for **Moallem Academy** on top of the established web foundation with:
+
+- correct Clerk root integration
+- sign-in and sign-up routes
+- localized auth routes
+- public and protected route behavior
+- signed-in and signed-out app awareness
+- role-ready auth structure without overbuilding authorization
+- decisions that stay compatible with future mobile app identity flows
+
+This feature is about the **real authentication foundation**, not full dashboard implementation.
+
+---
+
+## Decisions used for this feature
+
+- Next.js version: 16.x App Router
+- Clerk integration uses `proxy.ts` in the root for current Next.js 16 setup
+- Auth pages live under localized routes: `app/[locale]/sign-in/...` and `app/[locale]/sign-up/...`
+- Clerk stays on prebuilt auth components for stability, but the pages are wrapped with a branded shell
+- Auth role logic is not fully implemented yet; only the foundation is prepared
+- Locale support begins now because Arabic-first and RTL-first are product-level requirements, not later polish work
+
+---
+
+## Step 1 — Verify Clerk environment variables
+
+### File to verify
+
+`.env.local`
+
+### Code
+
+```env
+# Clerk
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_xxxxxxxx
+CLERK_SECRET_KEY=sk_test_xxxxxxxx
+NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
+NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
+NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL=/
+NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=/
+```
+
+### Why this matters
+
+Clerk must be configured with real environment variables from the start.  
+Redirect values are kept simple at this stage because the app does not yet implement full role-based destination routing.
+
+### Verify
+
+```bash
+npm run dev
+```
+
+The app should start without Clerk key errors.
+
+---
+
+## Step 2 — Keep Clerk mounted at the app root
+
+### File to update
+
+`app/layout.tsx`
+
+### Code
+
+```ts
+import type { Metadata } from "next";
+import "./globals.css";
+
+export const metadata: Metadata = {
+  title: "Moallem Academy | أكاديمية المعلم",
+  description: "منصة أكاديمية المعلم للتعليم الإلكتروني",
+};
+
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  return (
+    <html suppressHydrationWarning>
+      <body>{children}</body>
+    </html>
+  );
+}
+```
+
+### Why this matters
+
+When routes moved under `app/[locale]`, the root layout still had to keep the required `<html>` and `<body>` tags.  
+Next.js App Router requires that structure in the root layout even when localization is handled in nested layouts.
+
+---
+
+## Step 3 — Add locale-aware Clerk and next-intl providers
+
+### File to create
+
+`app/[locale]/layout.tsx`
+
+### Code
+
+```ts
+import { ClerkProvider } from "@clerk/nextjs";
+import { arSA, enUS } from "@clerk/localizations";
+import { NextIntlClientProvider, hasLocale } from "next-intl";
+import { getMessages } from "next-intl/server";
+import { notFound } from "next/navigation";
+import { routing } from "@/i18n/routing";
+
+type Props = {
+  children: React.ReactNode;
+  params: Promise<{ locale: string }>;
+};
+
+export default async function LocaleLayout({ children, params }: Props) {
+  const { locale } = await params;
+
+  if (!hasLocale(routing.locales, locale)) {
+    notFound();
+  }
+
+  const messages = await getMessages();
+  const direction = locale === "ar" ? "rtl" : "ltr";
+
+  return (
+    <ClerkProvider localization={locale === "ar" ? arSA : enUS}>
+      <NextIntlClientProvider locale={locale} messages={messages}>
+        <div dir={direction}>{children}</div>
+      </NextIntlClientProvider>
+    </ClerkProvider>
+  );
+}
+```
+
+### Why this matters
+
+This keeps Clerk and translations locale-aware while preserving Arabic RTL and English LTR behavior.  
+It also ensures Clerk’s own built-in copy follows the active locale instead of only translating the surrounding page shell.
+
+---
+
+## Step 4 — Add Next.js 16 `proxy.ts` for Clerk + locale routing
+
+### File to update
+
+`proxy.ts`
+
+### Code
+
+```ts
+import { clerkMiddleware } from "@clerk/nextjs/server";
+import createMiddleware from "next-intl/middleware";
+import { routing } from "./i18n/routing";
+
+const handleI18nRouting = createMiddleware(routing);
+
+export default clerkMiddleware(async (_auth, req) => {
+  return handleI18nRouting(req);
+});
+
+export const config = {
+  matcher: [
+    "/",
+    "/(ar|en)/:path*",
+    "/((?!_next|_vercel|.*\\..*).*)",
+    "/(api|trpc)(.*)",
+  ],
+};
+```
+
+### Why this matters
+
+Clerk requires `clerkMiddleware()` to run so Clerk components and auth helpers work correctly.  
+At the same time, locale routing had to be composed into the same `proxy.ts` so `/` redirects into locale-aware routes like `/ar` and `/en`.
+
+### Verify
+
+- `/` redirects into the localized app
+- `/ar` loads
+- `/en` loads
+- Clerk no longer throws the `auth() was called but Clerk can't detect usage of clerkMiddleware()` error
+
+---
+
+## Step 5 — Add i18n routing config
+
+### Files to create
+
+- `i18n/routing.ts`
+- `i18n/navigation.ts`
+- `i18n/request.ts`
+
+### Code
+
+`i18n/routing.ts`
+```ts
+import { defineRouting } from "next-intl/routing";
+
+export const routing = defineRouting({
+  locales: ["ar", "en"],
+  defaultLocale: "ar",
+  localePrefix: "always",
+});
+```
+
+`i18n/navigation.ts`
+```ts
+import { createNavigation } from "next-intl/navigation";
+import { routing } from "./routing";
+
+export const { Link, redirect, usePathname, useRouter, getPathname } =
+  createNavigation(routing);
+```
+
+`i18n/request.ts`
+```ts
+import { getRequestConfig } from "next-intl/server";
+import { routing } from "./routing";
+
+export default getRequestConfig(async ({ requestLocale }) => {
+  let locale = await requestLocale;
+
+  if (!locale || !routing.locales.includes(locale as "ar" | "en")) {
+    locale = routing.defaultLocale;
+  }
+
+  return {
+    locale,
+    messages: (await import(`../messages/${locale}.ts`)).default,
+  };
+});
+```
+
+### Why this matters
+
+Localization needed to be introduced now, not later, because Arabic-first and English-secondary affect routes, layout direction, auth pages, and future app shell structure.  
+Using locale-based routing from the start avoids retrofitting all pages later.
+
+---
+
+## Step 6 — Add locale message files
+
+### Files to create
+
+- `messages/ar.ts`
+- `messages/en.ts`
+
+### Code
+
+`messages/ar.ts`
+```ts
+const messages = {
+  HomePage: {
+    brand: "أكاديمية المعلم",
+    title: "منصة أكاديمية المعلم للتعليم الإلكتروني",
+    description: "تصفح الكورسات وابدأ رحلتك التعليمية.",
+    signIn: "تسجيل الدخول",
+    signUp: "إنشاء حساب",
+    startNow: "ابدأ الآن",
+  },
+  auth: {
+    signIn: {
+      title: "مرحباً بعودتك",
+      description: "سجّل الدخول للوصول إلى رحلتك التعليمية داخل أكاديمية المعلم.",
+    },
+    signUp: {
+      title: "أنشئ حسابك",
+      description: "ابدأ رحلتك في أكاديمية المعلم وادخل إلى تجربة تعليمية عربية أولاً.",
+    },
+    shell: {
+      brand: "أكاديمية المعلم",
+      tagline: "تجربة تعليمية عربية أولاً، مع أساس جاهز لأدوار الطالب والمعلم والإدارة.",
+    },
+  },
+} as const;
+
+export default messages;
+```
+
+`messages/en.ts`
+```ts
+const messages = {
+  HomePage: {
+    brand: "Moallem Academy",
+    title: "Moallem Academy e-learning platform",
+    description: "Browse courses and begin your learning journey.",
+    signIn: "Sign in",
+    signUp: "Sign up",
+    startNow: "Get started",
+  },
+  auth: {
+    signIn: {
+      title: "Welcome back",
+      description: "Sign in to continue your learning journey in Moallem Academy.",
+    },
+    signUp: {
+      title: "Create your account",
+      description: "Start your Moallem Academy journey with an Arabic-first learning experience.",
+    },
+    shell: {
+      brand: "Moallem Academy",
+      tagline: "An Arabic-first learning experience with a clean foundation for student, teacher, and admin roles.",
+    },
+  },
+} as const;
+
+export default messages;
+```
+
+### Why this matters
+
+Messages were kept in single locale files because the project already followed that pattern.  
+The auth namespace was added inside those files so sign-in and sign-up pages could use the same translation source as the rest of the app.
+
+---
+
+## Step 7 — Move the home page into locale routing
+
+### File to create
+
+`app/[locale]/page.tsx`
+
+### Code
+
+```ts
+import { Show, UserButton } from "@clerk/nextjs";
+import { useTranslations } from "next-intl";
+import { Link } from "@/i18n/navigation";
+
+export default function HomePage() {
+  const t = useTranslations("HomePage");
+
+  return (
+    <main className="min-h-screen bg-background text-text-primary">
+      <header className="flex items-center justify-between border-b border-border px-6 py-4">
+        <p className="font-semibold">{t("brand")}</p>
+
+        <div className="flex items-center gap-4">
+          <Show when="signed-out">
+            <Link
+              href="/sign-in"
+              className="text-sm text-text-secondary hover:text-text-primary"
+            >
+              {t("signIn")}
+            </Link>
+
+            <Link
+              href="/sign-up"
+              className="text-sm text-text-secondary hover:text-text-primary"
+            >
+              {t("signUp")}
+            </Link>
+          </Show>
+
+          <Show when="signed-in">
+            <UserButton />
+          </Show>
+        </div>
+      </header>
+
+      <section className="mx-auto flex min-h-[calc(100vh-65px)] max-w-5xl flex-col justify-center gap-6 px-6 py-16">
+        <h1 className="text-3xl font-semibold">{t("title")}</h1>
+
+        <p className="max-w-2xl text-base text-text-secondary">
+          {t("description")}
+        </p>
+
+        <Show when="signed-out">
+          <Link
+            href="/sign-up"
+            className="w-fit rounded-md bg-accent px-4 py-2 text-sm font-medium text-white"
+          >
+            {t("startNow")}
+          </Link>
+        </Show>
+      </section>
+    </main>
+  );
+}
+```
+
+### Why this matters
+
+The home page needed to be locale-aware and auth-aware at the same time.  
+This confirmed the app could render different UI states for signed-in and signed-out users while keeping the page fully localized.
+
+---
+
+## Step 8 — Move sign-in and sign-up routes under `[locale]`
+
+### Files to create
+
+- `app/[locale]/sign-in/[[...sign-in]]/page.tsx`
+- `app/[locale]/sign-up/[[...sign-up]]/page.tsx`
+
+### Code
+
+`app/[locale]/sign-in/[[...sign-in]]/page.tsx`
+```ts
+import { SignIn } from "@clerk/nextjs";
+import { getTranslations } from "next-intl/server";
+import { AuthShell } from "@/components/auth/auth-shell";
+import { clerkAppearance } from "@/lib/clerk-appearance";
+
+type Props = {
+  params: Promise<{ locale: string }>;
+};
+
+export default async function SignInPage({ params }: Props) {
+  const { locale } = await params;
+  const t = await getTranslations("auth");
+
+  return (
+    <AuthShell
+      brand={t("shell.brand")}
+      tagline={t("shell.tagline")}
+      title={t("signIn.title")}
+      description={t("signIn.description")}
+    >
+      <SignIn
+        appearance={clerkAppearance}
+        path={`/${locale}/sign-in`}
+        routing="path"
+        signUpUrl={`/${locale}/sign-up`}
+      />
+    </AuthShell>
+  );
+}
+```
+
+`app/[locale]/sign-up/[[...sign-up]]/page.tsx`
+```ts
+import { SignUp } from "@clerk/nextjs";
+import { getTranslations } from "next-intl/server";
+import { AuthShell } from "@/components/auth/auth-shell";
+import { clerkAppearance } from "@/lib/clerk-appearance";
+
+type Props = {
+  params: Promise<{ locale: string }>;
+};
+
+export default async function SignUpPage({ params }: Props) {
+  const { locale } = await params;
+  const t = await getTranslations("auth");
+
+  return (
+    <AuthShell
+      brand={t("shell.brand")}
+      tagline={t("shell.tagline")}
+      title={t("signUp.title")}
+      description={t("signUp.description")}
+    >
+      <SignUp
+        appearance={clerkAppearance}
+        path={`/${locale}/sign-up`}
+        routing="path"
+        signInUrl={`/${locale}/sign-in`}
+      />
+    </AuthShell>
+  );
+}
+```
+
+### Why this matters
+
+Localized auth routes are necessary so authentication does not break the language structure of the app.  
+This also keeps sign-in and sign-up links consistent for Arabic and English users.
+
+---
+
+## Step 9 — Add a branded auth shell
+
+### File to create
+
+`components/auth/auth-shell.tsx`
+
+### Code
+
+```ts
+type AuthShellProps = {
+  children: React.ReactNode;
+  title: string;
+  description: string;
+  brand: string;
+  tagline: string;
+};
+
+export function AuthShell({
+  children,
+  title,
+  description,
+  brand,
+  tagline,
+}: AuthShellProps) {
+  return (
+    <main className="min-h-screen bg-background text-text-primary">
+      <div className="grid min-h-screen lg:grid-cols-2">
+        <section className="hidden bg-surface-secondary px-10 py-12 lg:flex lg:flex-col lg:justify-between">
+          <div>
+            <p className="text-sm font-medium text-text-secondary">{brand}</p>
+          </div>
+
+          <div className="max-w-lg space-y-5">
+            <h1 className="text-4xl font-semibold leading-tight text-text-primary">
+              {title}
+            </h1>
+            <p className="text-base leading-7 text-text-secondary">
+              {description}
+            </p>
+          </div>
+
+          <div className="text-sm text-text-secondary">{tagline}</div>
+        </section>
+
+        <section className="flex items-center justify-center px-4 py-10 sm:px-6 lg:px-10">
+          <div className="w-full max-w-md">
+            <div className="mb-6 space-y-2 text-center lg:hidden">
+              <p className="text-sm text-text-secondary">{brand}</p>
+              <h1 className="text-2xl font-semibold text-text-primary">
+                {title}
+              </h1>
+              <p className="text-sm text-text-secondary">{description}</p>
+            </div>
+
+            {children}
+          </div>
+        </section>
+      </div>
+    </main>
+  );
+}
+```
+
+### Why this matters
+
+The goal was not to rebuild auth forms from scratch, but to stop the app from feeling like default Clerk pages.  
+This shell gave sign-in and sign-up a branded product feel while keeping Clerk’s real authentication flow intact.
+
+---
+
+## Step 10 — Add Clerk appearance customization
+
+### File to create
+
+`lib/clerk-appearance.ts`
+
+### Code
+
+```ts
+import type { Appearance } from "@clerk/types";
+import { simple } from "@clerk/themes";
+
+export const clerkAppearance: Appearance = {
+  theme: simple,
+  cssLayerName: "clerk",
+  variables: {
+    colorPrimary: "#7C5CFC",
+    colorForeground: "#101828",
+    colorMutedForeground: "#6A7282",
+    colorBackground: "#FFFFFF",
+    colorInput: "#F9FAFB",
+    colorInputForeground: "#101828",
+    colorNeutral: "#E7EAF3",
+    colorPrimaryForeground: "#FFFFFF",
+    colorDanger: "#EF4444",
+    colorSuccess: "#10B981",
+    colorWarning: "#FF8904",
+    borderRadius: "1rem",
+    fontFamily: "inherit"
+  },
+  elements: {
+    card: "border border-[#E7EAF3] bg-white shadow-none",
+    headerTitle: "text-[#101828]",
+    headerSubtitle: "text-[#6A7282]",
+    formFieldLabel: "text-[#101828]",
+    formFieldInput: "bg-[#F9FAFB] text-[#101828] border border-[#E7EAF3]",
+    formButtonPrimary: "bg-[#7C5CFC] text-white hover:opacity-90",
+    footerActionText: "text-[#6A7282]",
+    footerActionLink: "text-[#7C5CFC]",
+    dividerText: "text-[#99A1AF]",
+    dividerLine: "bg-[#E7EAF3]",
+    socialButtonsBlockButton:
+      "bg-white text-[#101828] border border-[#E7EAF3] hover:bg-[#F9FAFB]",
+    socialButtonsBlockButtonText: "text-[#101828]",
+    socialButtonsProviderIcon: "opacity-100",
+    identityPreviewText: "text-[#101828]",
+    formResendCodeLink: "text-[#7C5CFC]"
+  },
+  layout: {
+    socialButtonsPlacement: "bottom",
+    socialButtonsVariant: "blockButton"
+  }
+};
+```
+
+### Why this matters
+
+The original auth UI colors did not match the actual Moallem Academy design tokens, and some text was not readable.  
+Using Clerk’s simpler theme base and overriding it with the real product palette made the auth flow visually consistent with the app.
+
+---
+
+## Step 11 — Add CSS overrides for stubborn Clerk elements
+
+### File to update
+
+`app/globals.css`
+
+### Code
+
+```css
+@layer clerk {
+  .cl-card {
+    background: #ffffff !important;
+    border: 1px solid #e7eaf3 !important;
+    box-shadow: none !important;
+  }
+
+  .cl-headerTitle,
+  .cl-formFieldLabel,
+  .cl-identityPreviewText,
+  .cl-formFieldSuccessText,
+  .cl-formFieldWarningText,
+  .cl-navbarTitle {
+    color: #101828 !important;
+  }
+
+  .cl-headerSubtitle,
+  .cl-footerActionText,
+  .cl-dividerText {
+    color: #6a7282 !important;
+  }
+
+  .cl-formFieldInput,
+  .cl-otpCodeFieldInput {
+    background: #f9fafb !important;
+    color: #101828 !important;
+    border-color: #e7eaf3 !important;
+  }
+
+  .cl-formFieldInput::placeholder {
+    color: #99a1af !important;
+  }
+
+  .cl-formButtonPrimary {
+    background: #7c5cfc !important;
+    color: #ffffff !important;
+    box-shadow: none !important;
+  }
+
+  .cl-socialButtonsBlockButton {
+    background: #ffffff !important;
+    color: #101828 !important;
+    border: 1px solid #e7eaf3 !important;
+    box-shadow: none !important;
+  }
+
+  .cl-socialButtonsBlockButton:hover {
+    background: #f9fafb !important;
+  }
+
+  .cl-socialButtonsBlockButtonText {
+    color: #101828 !important;
+  }
+
+  .cl-socialButtonsProviderIcon {
+    opacity: 1 !important;
+  }
+
+  .cl-footerActionLink,
+  .cl-formResendCodeLink,
+  .cl-identityPreviewEditButton {
+    color: #7c5cfc !important;
+  }
+
+  .cl-dividerLine {
+    background: #e7eaf3 !important;
+  }
+}
+```
+
+### Why this matters
+
+Some Clerk UI parts, especially social login buttons and some text elements, still did not fully respect the intended product colors.  
+These overrides fixed the remaining visual mismatch while still using Clerk’s official UI components.
+
+---
+
+## Step 12 — Prepare the role-aware foundation
+
+### File to create
+
+`types/auth.ts`
+
+### Code
+
+```ts
+export type AppRole = "student" | "teacher" | "admin" | "staff";
+
+export interface ClerkUserPublicMetadata {
+  role?: AppRole;
+}
+```
+
+### Why this matters
+
+The app will later need teacher, student, and admin behavior, but this feature should not overbuild full authorization.  
+This creates a clean role-ready contract that can later map to Clerk metadata and Supabase profile records without using web-only shortcuts.
+
+---
+
+## Step 13 — Add locale-aware local verification
+
+### Command
+
+```bash
+npm run dev
+```
+
+### What to verify
+
+- `/` redirects into the localized app
+- `/ar` renders Arabic home page
+- `/en` renders English home page
+- `/ar/sign-in` renders branded Arabic sign-in
+- `/ar/sign-up` renders branded Arabic sign-up
+- `/en/sign-in` renders branded English sign-in
+- `/en/sign-up` renders branded English sign-up
+- signed-out users see auth calls to action
+- signed-in users see Clerk session-aware UI
+- auth pages keep the locale in their routing
+- RTL remains correct on Arabic pages
+- auth text and social login buttons are visually readable
+
+---
+
+## Step 14 — Commit the auth and localization foundation
+
+### Command
+
+```bash
+git add .
+git commit -m "feat(02): configure clerk auth foundation"
+git push origin main
+```
+
+Later, after the localization and app-shell work was completed as part of the same implementation track:
+
+```bash
+git add .
+git commit -m "feat(04): establish rtl localization and app shell foundation"
+git push origin main
+```
+
+### Why this matters
+
+The implementation ended up completing both the Clerk auth foundation and the RTL/localization/app-shell foundation together because the localized route structure and auth pages depended on each other.  
+Committing them clearly keeps the project history understandable.
+
+---
+
+## Feature 02 completion checklist
+
+- [x] Clerk is integrated into the real app structure
+- [x] `proxy.ts` is configured for Next.js 16
+- [x] Sign-in and sign-up routes work with localized routing
+- [x] Signed-in and signed-out app awareness is working
+- [x] Auth structure is prepared for later role-aware logic
+- [x] No fake auth data was introduced
+- [x] Auth decisions remain compatible with future mobile identity alignment
+- [x] Clerk auth pages were upgraded from default shell to branded app pages
+
+---
+
+## Feature 04 — Establish RTL, Localization, and App Shell Foundation
+
+### Goal
+
+Establish the localization and app-shell foundation for **Moallem Academy** with:
+
+- Arabic as the primary locale
+- English as the secondary locale
+- locale-aware routing
+- RTL-first layout handling
+- localized home and auth pages
+- app shell direction that future pages can follow without rework
+
+This feature is about making localization and directionality a real foundation, not an afterthought.
+
+---
+
+## Decisions used for this feature
+
+- Locale routing uses `app/[locale]/...`
+- Supported locales are `ar` and `en`
+- Default locale is `ar`
+- Arabic is treated as RTL-first from the beginning
+- Localization messages stay in one file per locale for now
+- Auth and home routes were migrated into locale-aware structure immediately
+
+---
+
+## Step 1 — Move routes under `[locale]`
+
+### Command
+
+```bash
+mkdir -p "app/[locale]"
+```
+
+Then move/create the relevant pages under:
+
+- `app/[locale]/page.tsx`
+- `app/[locale]/sign-in/[[...sign-in]]/page.tsx`
+- `app/[locale]/sign-up/[[...sign-up]]/page.tsx`
+
+### Why this matters
+
+Locale-based routing is easier to establish early than to retrofit later.  
+It keeps Arabic and English page structure explicit and prepares the app for future localized content flows.
+
+---
+
+## Step 2 — Add translation message files
+
+### Files used
+
+- `messages/ar.ts`
+- `messages/en.ts`
+
+### Why this matters
+
+This creates a single source of truth for visible app copy.  
+Keeping both home page and auth messages in the same locale files avoids scattered hardcoded strings.
+
+---
+
+## Step 3 — Add next-intl infrastructure
+
+### Files used
+
+- `i18n/routing.ts`
+- `i18n/navigation.ts`
+- `i18n/request.ts`
+
+### Why this matters
+
+This gives the app locale-aware links, locale-aware request loading, and a structured translation system that can scale as more product pages are added.
+
+---
+
+## Step 4 — Add locale-aware app shell layout
+
+### File used
+
+`app/[locale]/layout.tsx`
+
+### Why this matters
+
+A locale-specific layout lets the app apply the correct providers and direction handling to each active locale.  
+This keeps Arabic-first and English-secondary behavior centralized instead of scattered across pages.
+
+---
+
+## Step 5 — Confirm RTL and LTR rendering behavior
+
+### What was implemented
+
+- Arabic pages render with `dir="rtl"`
+- English pages render with `dir="ltr"`
+
+### Why this matters
+
+RTL cannot be deferred to a later styling cleanup because it changes layout flow, spacing direction, and navigation structure.  
+This feature made directionality part of the core page structure from the beginning.
+
+---
+
+## Step 6 — Verify localized home and auth flows
+
+### What to verify locally
+
+- `/ar` uses Arabic text and RTL layout
+- `/en` uses English text and LTR layout
+- `/ar/sign-in` and `/ar/sign-up` stay Arabic-first
+- `/en/sign-in` and `/en/sign-up` stay English-first
+- locale routing works together with Clerk
+- no route falls back to a broken unlocalized path
+
+---
+
+## Feature 04 completion checklist
+
+- [x] Arabic is the default locale
+- [x] English is added as the secondary locale
+- [x] Locale routing is active
+- [x] Home page is localized
+- [x] Sign-in and sign-up routes are localized
+- [x] RTL is treated as a first-class requirement
+- [x] App shell direction now supports future localized product pages
+- [x] Localization structure is ready to scale beyond auth and landing pages
+
+---
+
+## Notes for future features
+
+- Protected role-specific routes should move toward resource-based auth checks as Clerk evolves
+- Supabase profile sync should later mirror Clerk identity and role metadata
+- Locale files should keep expanding instead of reintroducing hardcoded strings
+- Shared shell components for student, teacher, and admin areas should build on the same locale-aware structure
+- UI polish can continue later without changing the auth or localization foundation

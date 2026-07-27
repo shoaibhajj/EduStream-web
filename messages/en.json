@@ -1,0 +1,24 @@
+{
+  "HomePage": {
+    "brand": "Moallem Academy",
+    "title": "Moallem Academy e-learning platform",
+    "description": "Browse courses and begin your learning journey.",
+    "signIn": "Sign in",
+    "signUp": "Sign up",
+    "startNow": "Get started"
+  },
+  "auth": {
+    "signIn": {
+      "title": "Welcome back",
+      "description": "Sign in to continue your learning journey in Moallem Academy."
+    },
+    "signUp": {
+      "title": "Create your account",
+      "description": "Start your Moallem Academy journey with an Arabic-first learning experience."
+    },
+    "shell": {
+      "brand": "Moallem Academy",
+      "tagline": "An Arabic-first learning experience with a clean foundation for student, teacher, and admin roles."
+    }
+  }
+}
