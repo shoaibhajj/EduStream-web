@@ -40,5 +40,20 @@
     "backToYears": "Back to academic years",
     "backToSubjects": "Back to subjects",
     "viewCourse": "View course"
+  },
+  "CourseDetail": {
+    "backToCourses": "Back to courses",
+    "lessonsHeading": "Course content",
+    "lessonsEmpty": "No published lessons for this course yet",
+    "previewBadge": "Free preview",
+    "lockedBadge": "Locked",
+    "accessibleBadge": "Accessible",
+    "enrollCta": "Enroll in this course",
+    "pendingNote": "Your enrollment request is under review",
+    "rejectedNote": "Your request was not approved, you may try again",
+    "confirmedNote": "You have full access to this course",
+    "notFoundTitle": "Course not found",
+    "notFoundDescription": "This course could not be found or is not published.",
+    "errorLoad": "Could not load course data, please try again"
   }
 }

@@ -2571,3 +2571,667 @@ This saves the first real end-to-end product flow, along with the shared query p
 - Feature 06 (course detail/preview/access states) should extend `lib/queries/browse.ts` or add a new `lib/queries/courses.ts` rather than querying Prisma directly from pages.
 - Feature 07 (teacher course management) will be the first feature to introduce real mutations, and should introduce `lib/mutations/courses.ts` alongside a matching `actions/teacher/*` Server Action layer and `app/api/teacher/*` route layer.
 - Always double-check dynamic route folder nesting (e.g. `[yearId]`) with `find` or `ls -R` after creating API routes by hand, since misplaced folders fail silently with a 404 rather than a build error.
+
+---
+
+## Feature 06 — Course Detail, Preview, and Access States
+
+### Goal
+
+Build the real course detail flow for students on **Moallem Academy** on top of the Feature 05 browse flow, using:
+
+- minimal, clean Prisma schema additions for `Lesson` and `Enrollment`
+- a shared, server-only read layer for course-detail and access-state data
+- a real course detail page powered by Neon through Prisma
+- clear preview / locked / accessible lesson states
+- a mobile-facing API route that reuses the exact same query logic
+- fully localized course-detail copy in Arabic and English
+- no payment/access-confirmation logic (deferred to Feature 09)
+
+This feature is about **detail + preview + access states**, not the full enrollment/payment workflow.
+
+---
+
+## Decisions used for this feature
+
+- No new database provider changes; Neon + Prisma stays as-is.
+- Two new models were added to the schema: `Lesson` and `Enrollment`.
+- `Lesson.videoUrl` was added as a nullable placeholder string only — the real multi-source media system (Cloudinary upload, mobile upload, external link) is deferred to Feature 08.
+- `Course.teacherId` was added now (nullable string, Clerk user ID) as a safe default so Feature 07 does not require another migration just to introduce ownership.
+- `EnrollmentStatus` enum (`pending`, `confirmed`, `rejected`) was added as the minimal truthful access-state model. The actual enroll/payment-trigger mutation is deferred to Feature 09.
+- Access state per lesson is resolved as: `preview` if `Lesson.isPreview` is true, `accessible` if the student has a `confirmed` enrollment, otherwise `locked`.
+- All read logic lives in `lib/queries/course.ts`, marked `server-only`, following the exact same pattern as `lib/queries/browse.ts` from Feature 05.
+- A parallel `app/api/courses/[courseId]/route.ts` was added so the mobile app can reach the same course-detail data over HTTP.
+- All visible course-detail strings were added to `messages/ar.json` and `messages/en.json` under a new `CourseDetail` namespace.
+- During this feature it was confirmed the project is fully on **Prisma 7**, and `schema.prisma` was cleaned up to remove the legacy `url` field from the `datasource` block, since Prisma 7 reads the connection URL exclusively from `prisma.config.ts`.
+
+---
+
+## Step 1 — Extend the Prisma schema with `Lesson` and `Enrollment`
+
+### File to update
+
+`prisma/schema.prisma`
+
+### Code
+
+```prisma
+enum EnrollmentStatus {
+  pending
+  confirmed
+  rejected
+}
+
+model Course {
+  // ...existing fields
+  teacherId String? @map("teacher_id")
+
+  lessons     Lesson[]
+  enrollments Enrollment[]
+}
+
+model Lesson {
+  id          String   @id @default(cuid())
+  courseId    String   @map("course_id")
+  titleAr     String   @map("title_ar")
+  titleEn     String?  @map("title_en")
+  description String?
+  videoUrl    String?  @map("video_url")
+  isPreview   Boolean  @default(false) @map("is_preview")
+  isPublished Boolean  @default(false) @map("is_published")
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@index([courseId])
+  @@map("lessons")
+}
+
+model Enrollment {
+  id        String           @id @default(cuid())
+  profileId String           @map("profile_id")
+  courseId  String           @map("course_id")
+  status    EnrollmentStatus @default(pending)
+  createdAt DateTime         @default(now()) @map("created_at")
+  updatedAt DateTime         @updatedAt @map("updated_at")
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  course  Course  @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, courseId])
+  @@index([profileId])
+  @@index([courseId])
+  @@map("enrollments")
+}
+```
+
+Also add the inverse relation on `Profile`:
+
+```prisma
+model Profile {
+  // ...existing fields
+  enrollments Enrollment[]
+}
+```
+
+### Why this matters
+
+`Lesson` carries the one field this feature truly needs beyond the obvious (`isPreview`) to distinguish free content from locked content. `videoUrl` is intentionally kept as a bare nullable string so Feature 08 can extend it into a real multi-source system without a breaking migration. `Enrollment` gives the app a real, truthful access-state model without building the actual payment/enroll-trigger flow yet — that stays fully deferred to Feature 09.
+
+---
+
+## Step 2 — Fix a stale `url` field in the datasource block
+
+### Problem encountered
+
+The project had already fully upgraded to **Prisma 7.9.1**, with `prisma.config.ts` correctly holding `datasource.url`. But `prisma/schema.prisma` still had a leftover `url = env("DATABASE_URL")` (commented and uncommented at different points), which is no longer valid syntax in Prisma 7 and caused a VS Code Prisma-extension validation error (`Argument "url" is missing in data source block "db"` when removed, or a "no longer supported" error when present).
+
+### File to update
+
+`prisma/schema.prisma`
+
+### Code
+
+```prisma
+datasource db {
+  provider = "postgresql"
+}
+```
+
+### Why this matters
+
+In Prisma 7, the `url` field must live exclusively in `prisma.config.ts`, never in `schema.prisma`. The VS Code Prisma extension's validator was still catching up with this and threw a false-positive error even though the CLI (`npx prisma generate`, `npx prisma migrate dev`) already worked correctly. The real fix is `schema.prisma` has no `url` at all, and the extension warning is either resolved by explicitly selecting the Prisma 7 version inside the extension (`Ctrl+Shift+P` → "Prisma: Select Prisma Version" → `7`) or safely ignored since it does not affect builds or migrations.
+
+### Verify
+
+```bash
+npx prisma --version
+```
+
+Confirms `Loaded Prisma config from prisma.config.ts` and `prisma: 7.9.1` with no CLI error.
+
+---
+
+## Step 3 — Apply the migration
+
+### Command
+
+```bash
+npx prisma migrate dev --name add-lesson-enrollment
+npx prisma generate
+```
+
+### Why this matters
+
+This creates the real `lessons` and `enrollments` tables in Neon and regenerates the Prisma client with the new model types.
+
+### Verify
+
+```bash
+npx prisma studio
+```
+
+Confirm `lessons` and `enrollments` tables exist and are empty.
+
+---
+
+## Step 4 — Add the shared course-detail query layer
+
+### File to create
+
+`lib/queries/course.ts`
+
+### Code
+
+```ts
+import "server-only";
+import { prisma } from "@/lib/prisma";
+
+export async function getCourseDetail(courseId: string) {
+  return prisma.course.findUnique({
+    where: { id: courseId, isPublished: true },
+    include: {
+      subject: {
+        include: {
+          academicYear: true,
+        },
+      },
+      lessons: {
+        where: { isPublished: true },
+        orderBy: { sortOrder: "asc" },
+        select: {
+          id: true,
+          titleAr: true,
+          titleEn: true,
+          isPreview: true,
+          sortOrder: true,
+        },
+      },
+    },
+  });
+}
+
+export async function getStudentEnrollmentForCourse(
+  profileId: string,
+  courseId: string
+) {
+  return prisma.enrollment.findUnique({
+    where: {
+      profileId_courseId: { profileId, courseId },
+    },
+    select: {
+      status: true,
+    },
+  });
+}
+```
+
+### Why this matters
+
+`getCourseDetail` is public data, always callable regardless of auth state. `getStudentEnrollmentForCourse` is only ever called when a signed-in student is viewing the page, keeping the two concerns cleanly separated and independently reusable from mobile API routes — the same shared-query pattern established in Feature 05's `lib/queries/browse.ts`.
+
+---
+
+## Step 5 — Add the mobile-facing course API route
+
+### File to create
+
+`app/api/courses/[courseId]/route.ts`
+
+### Code
+
+```ts
+import { NextRequest, NextResponse } from "next/server";
+import { getCourseDetail } from "@/lib/queries/course";
+
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ courseId: string }> }
+) {
+  try {
+    const { courseId } = await params;
+    const course = await getCourseDetail(courseId);
+    if (!course) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+    return NextResponse.json({ course });
+  } catch (error) {
+    console.error("[api/courses/courseId] GET error:", error);
+    return NextResponse.json({ error: "Server error" }, { status: 500 });
+  }
+}
+```
+
+### Why this matters
+
+React Native cannot import Server Components or call `lib/queries/*` directly, so this thin Route Handler is the only door the mobile app has into course-detail data. It contains no business logic of its own — it only wraps `getCourseDetail`.
+
+### Verify
+
+```bash
+curl http://localhost:3000/api/courses/<a-real-course-id>
+```
+
+Returns clean JSON, not an HTML error page.
+
+---
+
+## Step 6 — Add localized course-detail copy
+
+### Files to update
+
+`messages/ar.json`, `messages/en.json`
+
+### Code (added as a new `CourseDetail` namespace)
+
+```json
+"CourseDetail": {
+  "backToCourses": "العودة إلى الكورسات",
+  "lessonsHeading": "محتوى الكورس",
+  "lessonsEmpty": "لا توجد دروس منشورة لهذا الكورس بعد",
+  "previewBadge": "معاينة مجانية",
+  "lockedBadge": "مقفل",
+  "accessibleBadge": "متاح",
+  "enrollCta": "اشترك في الكورس",
+  "pendingNote": "طلبك قيد المراجعة",
+  "rejectedNote": "لم يتم قبول طلبك، يمكنك إعادة المحاولة",
+  "confirmedNote": "لديك وصول كامل إلى هذا الكورس",
+  "notFoundTitle": "الكورس غير موجود",
+  "notFoundDescription": "لا يمكن العثور على هذا الكورس أو أنه غير منشور.",
+  "errorLoad": "تعذّر تحميل بيانات الكورس، يرجى المحاولة مجدداً"
+}
+```
+
+```json
+"CourseDetail": {
+  "backToCourses": "Back to courses",
+  "lessonsHeading": "Course content",
+  "lessonsEmpty": "No published lessons for this course yet",
+  "previewBadge": "Free preview",
+  "lockedBadge": "Locked",
+  "accessibleBadge": "Accessible",
+  "enrollCta": "Enroll in this course",
+  "pendingNote": "Your enrollment request is under review",
+  "rejectedNote": "Your request was not approved, you may try again",
+  "confirmedNote": "You have full access to this course",
+  "notFoundTitle": "Course not found",
+  "notFoundDescription": "This course could not be found or is not published.",
+  "errorLoad": "Could not load course data, please try again"
+}
+```
+
+### Why this matters
+
+Every visible string in the course detail flow — headings, badges, empty states, and enrollment-status banners — comes from the locale files, keeping Arabic as the default experience and preventing any hardcoded fallback text from creeping into the components.
+
+---
+
+## Step 7 — Build the `LessonRow` component
+
+### File to create
+
+`components/student/LessonRow.tsx`
+
+### Code
+
+```tsx
+import { useTranslations } from "next-intl";
+import { Lock, PlayCircle, Eye } from "lucide-react";
+
+type LessonAccessState = "preview" | "accessible" | "locked";
+
+interface LessonRowProps {
+  titleAr: string;
+  titleEn: string | null;
+  accessState: LessonAccessState;
+  locale: string;
+  sortOrder: number;
+}
+
+export function LessonRow({
+  titleAr,
+  titleEn,
+  accessState,
+  locale,
+  sortOrder,
+}: LessonRowProps) {
+  const t = useTranslations("CourseDetail");
+  const title = locale === "ar" ? titleAr : titleEn ?? titleAr;
+
+  const badgeConfig = {
+    preview: {
+      label: t("previewBadge"),
+      className: "bg-success-light text-success",
+      icon: <Eye size={14} />,
+    },
+    accessible: {
+      label: t("accessibleBadge"),
+      className: "bg-accent-light text-accent",
+      icon: <PlayCircle size={14} />,
+    },
+    locked: {
+      label: t("lockedBadge"),
+      className: "bg-surface-secondary text-locked",
+      icon: <Lock size={14} />,
+    },
+  } as const;
+
+  const badge = badgeConfig[accessState];
+
+  return (
+    <li className="flex items-center justify-between gap-3 rounded-lg border border-border bg-surface px-4 py-3">
+      <div className="flex items-center gap-3 min-w-0">
+        <span className="text-sm text-text-muted w-6 shrink-0 text-center">
+          {sortOrder}
+        </span>
+        <span
+          className={`truncate text-sm font-medium ${
+            accessState === "locked" ? "text-text-muted" : "text-text-primary"
+          }`}
+        >
+          {title}
+        </span>
+      </div>
+      <span
+        className={`flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${badge.className}`}
+      >
+        {badge.icon}
+        {badge.label}
+      </span>
+    </li>
+  );
+}
+```
+
+### Why this matters
+
+Isolating the lesson row into its own component keeps the badge logic (preview/accessible/locked) in one place, using the exact design tokens (`success`, `accent`, `locked`) already defined in `web-ui-context.md` instead of raw hex values.
+
+---
+
+## Step 8 — Build the course detail page
+
+### File to create
+
+`app/[locale]/(student)/course/[courseId]/page.tsx`
+
+### Code
+
+```tsx
+import { getTranslations } from "next-intl/server";
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { auth } from "@clerk/nextjs/server";
+import { getCourseDetail, getStudentEnrollmentForCourse } from "@/lib/queries/course";
+import { prisma } from "@/lib/prisma";
+import { LessonRow } from "@/components/student/LessonRow";
+
+export default async function CourseDetailPage({
+  params,
+}: {
+  params: Promise<{ locale: string; courseId: string }>;
+}) {
+  const { locale, courseId } = await params;
+  const t = await getTranslations("CourseDetail");
+
+  let course: Awaited<ReturnType<typeof getCourseDetail>> = null;
+  let loadError = false;
+
+  try {
+    course = await getCourseDetail(courseId);
+  } catch (error) {
+    console.error("[CourseDetailPage] load error:", error);
+    loadError = true;
+  }
+
+  if (!loadError && !course) notFound();
+
+  const { userId: clerkUserId } = await auth();
+  let enrollmentStatus: "none" | "pending" | "confirmed" | "rejected" = "none";
+
+  if (clerkUserId && course) {
+    try {
+      const profile = await prisma.profile.findUnique({
+        where: { clerkUserId },
+        select: { id: true },
+      });
+      if (profile) {
+        const enrollment = await getStudentEnrollmentForCourse(profile.id, course.id);
+        if (enrollment) {
+          enrollmentStatus = enrollment.status as typeof enrollmentStatus;
+        }
+      }
+    } catch (error) {
+      console.error("[CourseDetailPage] enrollment check error:", error);
+    }
+  }
+
+  const hasFullAccess = enrollmentStatus === "confirmed";
+  const courseName = locale === "ar" ? course?.nameAr : course?.nameEn ?? course?.nameAr;
+  const courseDescription =
+    locale === "ar" ? course?.descriptionAr : course?.descriptionEn ?? course?.descriptionAr;
+
+  return (
+    <main className="px-6 py-10 max-w-3xl mx-auto" dir="auto">
+      {loadError ? (
+        <p className="text-error">{t("errorLoad")}</p>
+      ) : (
+        <>
+          <Link
+            href={`/${locale}/browse`}
+            className="mb-6 inline-block text-sm text-text-muted hover:underline"
+          >
+            ← {t("backToCourses")}
+          </Link>
+
+          <div className="mb-8">
+            {course!.thumbnailUrl && (
+              <img
+                src={course!.thumbnailUrl}
+                alt=""
+                className="mb-5 w-full rounded-xl object-cover aspect-video"
+              />
+            )}
+            <h1 className="text-2xl font-bold text-text-primary mb-2">{courseName}</h1>
+            {courseDescription && (
+              <p className="text-sm text-text-secondary">{courseDescription}</p>
+            )}
+          </div>
+
+          {!clerkUserId && (
+            <div className="mb-6 rounded-xl border border-border bg-surface-secondary px-5 py-4">
+              <p className="text-sm text-text-secondary mb-3">{t("enrollCta")}</p>
+              <Link
+                href={`/${locale}/sign-in`}
+                className="inline-block rounded-md bg-accent px-4 py-2 text-sm font-medium text-white"
+              >
+                {t("enrollCta")}
+              </Link>
+            </div>
+          )}
+
+          {clerkUserId && enrollmentStatus === "none" && (
+            <div className="mb-6 rounded-xl border border-border bg-surface-secondary px-5 py-4">
+              <p className="text-sm text-text-secondary">{t("enrollCta")}</p>
+            </div>
+          )}
+
+          {clerkUserId && enrollmentStatus === "pending" && (
+            <div className="mb-6 rounded-xl border border-warning bg-surface-secondary px-5 py-4">
+              <p className="text-sm text-warning font-medium">{t("pendingNote")}</p>
+            </div>
+          )}
+
+          {clerkUserId && enrollmentStatus === "rejected" && (
+            <div className="mb-6 rounded-xl border border-error bg-surface-secondary px-5 py-4">
+              <p className="text-sm text-error font-medium">{t("rejectedNote")}</p>
+            </div>
+          )}
+
+          {clerkUserId && enrollmentStatus === "confirmed" && (
+            <div className="mb-6 rounded-xl border border-success bg-success-light px-5 py-4">
+              <p className="text-sm text-success font-medium">{t("confirmedNote")}</p>
+            </div>
+          )}
+
+          <section>
+            <h2 className="mb-4 text-base font-semibold text-text-primary">
+              {t("lessonsHeading")}
+            </h2>
+
+            {course!.lessons.length === 0 ? (
+              <p className="text-sm text-text-muted">{t("lessonsEmpty")}</p>
+            ) : (
+              <ul className="flex flex-col gap-2">
+                {course!.lessons.map((lesson, index) => {
+                  const accessState = lesson.isPreview
+                    ? "preview"
+                    : hasFullAccess
+                    ? "accessible"
+                    : "locked";
+
+                  return (
+                    <LessonRow
+                      key={lesson.id}
+                      titleAr={lesson.titleAr}
+                      titleEn={lesson.titleEn}
+                      accessState={accessState}
+                      locale={locale}
+                      sortOrder={index + 1}
+                    />
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+        </>
+      )}
+    </main>
+  );
+}
+```
+
+### Why this matters
+
+This is the real end-to-end course detail flow: it fetches public course data unconditionally, then layers in a signed-in student's enrollment status only when relevant, and resolves each lesson's access state (`preview` / `accessible` / `locked`) purely from real database fields — no enrollment or payment logic is faked.
+
+### Bug encountered and fixed
+
+TypeScript flagged `enrollmentStatus === "confirmed"` as an impossible comparison because the `let enrollmentStatus = "none"` declaration (without an explicit type) was narrowed to the literal type `"none"`. Fixed by explicitly typing the declaration:
+
+```ts
+let enrollmentStatus: "none" | "pending" | "confirmed" | "rejected" = "none";
+```
+
+and casting the Prisma enum value on assignment:
+
+```ts
+enrollmentStatus = enrollment.status as typeof enrollmentStatus;
+```
+
+---
+
+## Step 9 — Seed a test lesson for manual verification
+
+### Command
+
+```bash
+npx prisma studio
+```
+
+Manually added two rows to the `lessons` table for an existing published course:
+- One row with `isPreview = true`, `isPublished = true`
+- One row with `isPreview = false`, `isPublished = true`
+
+### Why this matters
+
+Without at least one lesson in the database, the lesson list always renders the empty state, making it impossible to visually confirm the preview vs. locked badge logic.
+
+---
+
+## Step 10 — Local verification used for this feature
+
+### Commands
+
+```bash
+npx tsc --noEmit
+npm run build
+```
+
+### What to verify
+
+- `/ar/course/<valid-published-course-id>` loads the course detail page in Arabic with RTL layout
+- `/en/course/<valid-published-course-id>` loads in English
+- a lesson with `isPreview = true` shows the green "معاينة مجانية" / "Free preview" badge
+- a lesson with `isPreview = false` and no confirmed enrollment shows the "مقفل" / "Locked" badge
+- `curl http://localhost:3000/api/courses/<courseId>` returns valid JSON
+- an invalid course ID hits the Next.js 404 page
+- no hardcoded Arabic or English strings remain in any component
+- `npx tsc --noEmit` and `npm run build` both pass with no errors
+
+---
+
+## Step 11 — Commit the course detail flow
+
+### Command
+
+```bash
+git add .
+git commit -m "feat(06): course detail, preview, and access states"
+git push origin main
+```
+
+### Why this matters
+
+This saves the real course detail flow, the shared `lib/queries/course.ts` read layer, and the mobile-facing `app/api/courses/[courseId]` route, all following the same cross-platform pattern established in Feature 05.
+
+---
+
+## Feature 06 completion checklist
+
+- [x] `Lesson` and `Enrollment` models added to the Prisma schema with minimal fields
+- [x] `Lesson.videoUrl` added only as a placeholder for Feature 08
+- [x] `Course.teacherId` added as a safe default for Feature 07
+- [x] `EnrollmentStatus` enum added without building the actual payment/enroll-trigger flow
+- [x] Legacy `url` field removed from `schema.prisma`'s `datasource` block, consistent with Prisma 7's config-based model
+- [x] Migration applied cleanly with `prisma migrate dev`
+- [x] `lib/queries/course.ts` created as the shared read layer for course detail and enrollment status
+- [x] `app/api/courses/[courseId]/route.ts` added for mobile consumption, reusing the same query functions
+- [x] Real course detail page built as a Server Component with zero client-side fetching
+- [x] Preview / locked / accessible lesson states rendered clearly via `LessonRow`
+- [x] All course-detail copy localized in `messages/ar.json` and `messages/en.json` under `CourseDetail`
+- [x] Enrollment-status banners (pending/confirmed/rejected) shown without faking payment completion
+- [x] TypeScript union-narrowing bug on `enrollmentStatus` identified and fixed
+- [x] No stale Supabase assumptions present in this feature
+
+---
+
+## Notes for future features
+
+- Feature 07 (teacher dashboard/course management) can now safely add real mutations for `Course` and `Lesson` since `teacherId` already exists on `Course` — no additional migration needed just for ownership.
+- Feature 08 (media source system) should extend `Lesson.videoUrl` into a proper multi-source model (Cloudinary upload, mobile upload, external link) rather than reusing the plain string as-is long term.
+- Feature 09 (manual payment/access confirmation) should introduce the real `Enrollment`-creating mutation and the actual enroll button action — the UI placeholder ("enrollCta") added in Feature 06 is display-only and has no wired mutation yet.
+- The enrollment-status check pattern used here (Clerk `userId` → `Profile.clerkUserId` → `Enrollment.profileId`) should be reused as-is in Feature 09 rather than reinvented.
+- Keep an eye on the VS Code Prisma extension's Prisma-version detection setting after any future Prisma upgrade — it does not always auto-detect major version changes.

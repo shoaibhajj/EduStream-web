@@ -40,5 +40,20 @@
     "backToYears": "العودة إلى السنوات الدراسية",
     "backToSubjects": "العودة إلى المواد",
     "viewCourse": "عرض الكورس"
+  },
+  "CourseDetail": {
+    "backToCourses": "العودة إلى الكورسات",
+    "lessonsHeading": "محتوى الكورس",
+    "lessonsEmpty": "لا توجد دروس منشورة لهذا الكورس بعد",
+    "previewBadge": "معاينة مجانية",
+    "lockedBadge": "مقفل",
+    "accessibleBadge": "متاح",
+    "enrollCta": "اشترك في الكورس",
+    "pendingNote": "طلبك قيد المراجعة",
+    "rejectedNote": "لم يتم قبول طلبك، يمكنك إعادة المحاولة",
+    "confirmedNote": "لديك وصول كامل إلى هذا الكورس",
+    "notFoundTitle": "الكورس غير موجود",
+    "notFoundDescription": "لا يمكن العثور على هذا الكورس أو أنه غير منشور.",
+    "errorLoad": "تعذّر تحميل بيانات الكورس، يرجى المحاولة مجدداً"
   }
 }

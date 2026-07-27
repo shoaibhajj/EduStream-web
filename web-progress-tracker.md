@@ -7,8 +7,8 @@ Update this file after each completed feature.
 ## Current Status
 Phase: Phase 2 — Core Product Flows
 Current Goal: Continue building core student and teacher product flows on top of the real Neon + Prisma foundation, using a shared query/mutation layer that serves both web and future mobile API consumers
-Last completed: 05 — Student Browse and Course Discovery Flow
-Next up: 06 — Course Detail, Preview, and Access States
+Last completed: 06 — Course Detail, Preview, and Access States
+Next up: 07 — Teacher Dashboard and Course Management Flow
 
 ## Required First Read
 Before starting any feature, the AI agent must read these 8 files from the repo first:
@@ -52,7 +52,7 @@ Do not start implementation before reading all 8 files.
 
 ### Phase 2 — Core Product Flows
 - [x] 05 — Student Browse and Course Discovery Flow
-- [ ] 06 — Course Detail, Preview, and Access States
+- [x] 06 — Course Detail, Preview, and Access States
 - [ ] 07 — Teacher Dashboard and Course Management Flow
 - [ ] 08 — Course Media Source System (Cloudinary Upload + External Links)
 - [ ] 09 — Manual Payment and Access Confirmation Web Flows
@@ -68,7 +68,7 @@ Do not start implementation before reading all 8 files.
 - [ ] 15 — Deployment and Environment Readiness
 
 ## In Progress
-- 06 — Course Detail, Preview, and Access States
+- 07 — Teacher Dashboard and Course Management Flow (not yet started)
 
 ## Open Questions
 - Confirm exact admin/staff permissions for enrollment override, access confirmation, and content moderation.
@@ -77,8 +77,10 @@ Do not start implementation before reading all 8 files.
 - Confirm whether Cloudinary is the only upload provider for owned video/media assets.
 - Confirm how preview/free-lesson media should be modeled across uploaded and linked content.
 - Confirm whether Neon + Prisma is the permanent shared backend direction for web only, or whether future mobile/backend alignment will also move away from Supabase.
-- Confirm whether mobile API routes need authentication (Clerk token verification) starting with Feature 06/07, or whether this is deferred until Feature 09 (payment/access confirmation).
+- Confirm whether mobile API routes need authentication (Clerk token verification) starting with Feature 07, or whether this is deferred until Feature 09 (payment/access confirmation).
 - Confirm final folder naming convention (`lib/mutations/` vs `lib/actions-core/`, etc.) before Feature 07 introduces the first real mutation flow.
+- Confirm ownership enforcement rules for `Course.teacherId` before Feature 07 allows teachers to create/edit courses.
+- Confirm whether `Lesson.videoUrl` stays a plain string placeholder or needs an early enum/type hint before Feature 08 introduces multi-source media.
 
 ## Architecture Decisions
 - Web starts now because the mobile side is stable enough for aligned implementation.
@@ -105,6 +107,11 @@ Do not start implementation before reading all 8 files.
 - Route Handlers under `app/api/` are the only way the mobile app can reach backend data or mutations, since React Native cannot import Server Components or Server Actions directly.
 - Starting Feature 06, any new backend logic must be written once inside `lib/queries/` or `lib/mutations/`, then exposed through both a web-facing caller (Server Component or Server Action) and, where mobile will need it, a matching `app/api/` Route Handler — to avoid logic duplication between platforms.
 - Official Next.js docs used to validate this pattern: App Router data fetching (nextjs.org/docs/app/building-your-application/data-fetching/fetching), Server Actions (nextjs.org/docs/app/api-reference/functions/server-actions), Backend for Frontend guide (nextjs.org/docs/app/guides/backend-for-frontend), and the Prisma + Next.js guide (prisma.io/docs/guides/frameworks/nextjs).
+- Feature 06 added `Lesson` and `Enrollment` models to the Prisma schema. `Lesson` includes a minimal `videoUrl` placeholder field intentionally left generic so Feature 08 can extend it into a proper multi-source media system (Cloudinary upload, mobile upload, or external link) without a breaking schema change.
+- Feature 06 added `Course.teacherId` (nullable string, Clerk user ID) as a safe-default field now, so Feature 07 does not require a schema migration just to introduce teacher ownership.
+- Feature 06 added `EnrollmentStatus` enum (`pending`, `confirmed`, `rejected`) as the minimal truthful access-state model. Full manual payment workflow and status-transition logic remain deferred to Feature 09.
+- Feature 06 confirmed the project has fully moved to Prisma 7 with `prisma.config.ts` as the source of connection configuration; `schema.prisma` no longer contains a `url` field in the `datasource` block, consistent with Prisma 7's config-based model.
+- Feature 06 established that `lib/queries/course.ts` exposes both public course-detail reads and student-specific enrollment-status reads as separate functions, avoiding over-fetching for unauthenticated visitors while staying reusable from mobile API routes.
 
 ## Session Notes
 - Mobile side is now stable enough to begin web implementation.
@@ -126,3 +133,9 @@ Do not start implementation before reading all 8 files.
 - All new browse-related visible strings were added to both `messages/ar.json` and `messages/en.json` under a new `Browse` namespace, covering headings, empty states, error states, and navigation labels, with Arabic-first defaults preserved.
 - Resolved a Prisma migration drift issue caused by earlier schema changes being applied via `db push` instead of `migrate dev`; `prisma migrate reset` was used safely since only seed data existed at the time.
 - Clarified and formally adopted the cross-platform architecture pattern for all future features: reads in `lib/queries/`, writes in `lib/mutations/`, Server Actions in `actions/` for web-only mutation triggers, and Route Handlers in `app/api/` for mobile and external consumers — this will be the standard going into Feature 06 and beyond.
+- Feature 06 completed the real course detail flow: `Lesson` and `Enrollment` models added to Prisma, `lib/queries/course.ts` added for shared course-detail and enrollment-status reads, `app/api/courses/[courseId]/route.ts` added for mobile consumption, and a real course detail page shipped at `app/[locale]/(student)/course/[courseId]/page.tsx`.
+- Feature 06 implemented clear, localized preview/locked/accessible lesson badges via a shared `LessonRow` component, using design tokens from `web-ui-context.md` (`success`, `accent`, `locked` colors).
+- Feature 06 added a new `CourseDetail` localization namespace to both `messages/ar.json` and `messages/en.json`, covering lesson headings, access badges, enrollment status banners, and error/empty states, with Arabic-first defaults preserved and English parity maintained.
+- Feature 06 confirmed enrollment-status UI (pending/confirmed/rejected banners) without building the actual payment or enrollment-trigger mutation, correctly deferring that business logic to Feature 09.
+- During Feature 06, the project was confirmed to already be running Prisma 7.9.1 with `prisma.config.ts` handling datasource connection config; `schema.prisma` was cleaned up to remove the legacy `url` field from the `datasource` block, resolving a stale VS Code Prisma extension validation warning unrelated to actual build/runtime behavior.
+- Feature 06 is now complete and verified locally: migration applied, Prisma client generated, course detail page renders correctly in Arabic and English with RTL layout, preview/locked lesson states confirmed visually, and the mobile-facing `app/api/courses/[courseId]` route returns valid JSON.

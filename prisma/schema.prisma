@@ -5,13 +5,18 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  // url      = env("DATABASE_URL")
 }
 
 enum AppRole {
   student
   teacher
   admin
+}
+
+enum EnrollmentStatus {
+  pending
+  confirmed
+  rejected
 }
 
 model Profile {
@@ -21,6 +26,8 @@ model Profile {
   displayName String?  @map("display_name")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
+
+  enrollments Enrollment[]
 
   @@map("profiles")
 }
@@ -57,6 +64,7 @@ model Subject {
 model Course {
   id            String   @id @default(cuid())
   subjectId     String   @map("subject_id")
+  teacherId     String?  @map("teacher_id")
   nameAr        String   @map("name_ar")
   nameEn        String?  @map("name_en")
   descriptionAr String?  @map("description_ar")
@@ -67,8 +75,46 @@ model Course {
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
-  subject       Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  subject       Subject      @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  lessons       Lesson[]
+  enrollments   Enrollment[]
 
   @@index([subjectId])
   @@map("courses")
+}
+
+model Lesson {
+  id          String   @id @default(cuid())
+  courseId    String   @map("course_id")
+  titleAr     String   @map("title_ar")
+  titleEn     String?  @map("title_en")
+  description String?
+  videoUrl    String?  @map("video_url")
+  isPreview   Boolean  @default(false) @map("is_preview")
+  isPublished Boolean  @default(false) @map("is_published")
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  course      Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@index([courseId])
+  @@map("lessons")
+}
+
+model Enrollment {
+  id        String           @id @default(cuid())
+  profileId String           @map("profile_id")
+  courseId  String           @map("course_id")
+  status    EnrollmentStatus @default(pending)
+  createdAt DateTime         @default(now()) @map("created_at")
+  updatedAt DateTime         @updatedAt @map("updated_at")
+
+  profile   Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  course    Course  @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, courseId])
+  @@index([profileId])
+  @@index([courseId])
+  @@map("enrollments")
 }
