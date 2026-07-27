@@ -5,10 +5,10 @@ Repo: [https://github.com/shoaibhajj/EduStream-web.git](https://github.com/shoai
 Update this file after each completed feature.
 
 ## Current Status
-Phase: Phase 1 — Real Web Foundation
-Current Goal: Continue the real web platform by adding the Neon database foundation on top of the completed Next.js, Clerk, localization, and app-shell groundwork
-Last completed: 03 — Configure Database Foundation (Neon + Prisma)
-Next up: 05 — Student Browse and Course Discovery Flow
+Phase: Phase 2 — Core Product Flows
+Current Goal: Continue building core student and teacher product flows on top of the real Neon + Prisma foundation, using a shared query/mutation layer that serves both web and future mobile API consumers
+Last completed: 05 — Student Browse and Course Discovery Flow
+Next up: 06 — Course Detail, Preview, and Access States
 
 ## Required First Read
 Before starting any feature, the AI agent must read these 8 files from the repo first:
@@ -39,6 +39,8 @@ Do not start implementation before reading all 8 files.
 - Media architecture must support this from the beginning instead of assuming a single video URL pattern.
 - Important backend change: the project database foundation moved away from Supabase and now uses **Neon + Prisma** for database connectivity on the web side.
 - Any old markdown/documentation references that still describe Supabase as the active web database foundation should be updated to reflect **Neon + Prisma** if that direction remains official.
+- The product is cross-platform by design: web (Next.js) and mobile (React Native/Expo) share the same backend, database, and business logic, but never share source code directly between repos.
+- Because of this, every feature that involves student- or teacher-facing data must be built with a shared data-access layer from the start, so both web and mobile can consume the same logic without duplicating it.
 
 ## Progress
 
@@ -49,7 +51,7 @@ Do not start implementation before reading all 8 files.
 - [x] 04 — Establish RTL, Localization, and App Shell Foundation
 
 ### Phase 2 — Core Product Flows
-- [ ] 05 — Student Browse and Course Discovery Flow
+- [x] 05 — Student Browse and Course Discovery Flow
 - [ ] 06 — Course Detail, Preview, and Access States
 - [ ] 07 — Teacher Dashboard and Course Management Flow
 - [ ] 08 — Course Media Source System (Cloudinary Upload + External Links)
@@ -66,7 +68,7 @@ Do not start implementation before reading all 8 files.
 - [ ] 15 — Deployment and Environment Readiness
 
 ## In Progress
-- 05 — Student Browse and Course Discovery Flow
+- 06 — Course Detail, Preview, and Access States
 
 ## Open Questions
 - Confirm exact admin/staff permissions for enrollment override, access confirmation, and content moderation.
@@ -75,6 +77,8 @@ Do not start implementation before reading all 8 files.
 - Confirm whether Cloudinary is the only upload provider for owned video/media assets.
 - Confirm how preview/free-lesson media should be modeled across uploaded and linked content.
 - Confirm whether Neon + Prisma is the permanent shared backend direction for web only, or whether future mobile/backend alignment will also move away from Supabase.
+- Confirm whether mobile API routes need authentication (Clerk token verification) starting with Feature 06/07, or whether this is deferred until Feature 09 (payment/access confirmation).
+- Confirm final folder naming convention (`lib/mutations/` vs `lib/actions-core/`, etc.) before Feature 07 introduces the first real mutation flow.
 
 ## Architecture Decisions
 - Web starts now because the mobile side is stable enough for aligned implementation.
@@ -91,6 +95,16 @@ Do not start implementation before reading all 8 files.
 - Database credentials must remain server-only and must never be exposed through `NEXT_PUBLIC_*` variables.
 - Clerk remains the source of truth for authentication identity.
 - The `profiles` table remains the app-level source of truth for role-ready user metadata and future app-specific user modeling.
+- A `Course` model was added to the Prisma schema, linked to `Subject`, with minimal fields (`nameAr`, `nameEn`, `descriptionAr`, `descriptionEn`, `thumbnailUrl`, `isPublished`, `sortOrder`). Price, teacher ownership, and lesson/media fields are intentionally deferred to later features.
+- Established the final cross-platform data-access pattern going forward:
+  - `lib/queries/*` — all read-only database access, callable directly from Server Components (web) and from API route handlers (mobile).
+  - `lib/mutations/*` — all real create/update/delete database logic, framework-agnostic, never tied to web or mobile directly.
+  - `actions/*` — thin Server Action wrappers around `lib/mutations/*`, used only by web Client Components (forms, buttons) via the `"use server"` directive.
+  - `app/api/*` — thin Route Handler wrappers around `lib/queries/*` and `lib/mutations/*`, used by the mobile app and any other external consumer over HTTP.
+- Server Actions are reserved strictly for web-triggered mutations (e.g. a teacher submitting a "create course" form). They are not usable by the mobile app and must never contain business logic that isn't also exposed through `lib/mutations/*`.
+- Route Handlers under `app/api/` are the only way the mobile app can reach backend data or mutations, since React Native cannot import Server Components or Server Actions directly.
+- Starting Feature 06, any new backend logic must be written once inside `lib/queries/` or `lib/mutations/`, then exposed through both a web-facing caller (Server Component or Server Action) and, where mobile will need it, a matching `app/api/` Route Handler — to avoid logic duplication between platforms.
+- Official Next.js docs used to validate this pattern: App Router data fetching (nextjs.org/docs/app/building-your-application/data-fetching/fetching), Server Actions (nextjs.org/docs/app/api-reference/functions/server-actions), Backend for Frontend guide (nextjs.org/docs/app/guides/backend-for-frontend), and the Prisma + Next.js guide (prisma.io/docs/guides/frameworks/nextjs).
 
 ## Session Notes
 - Mobile side is now stable enough to begin web implementation.
@@ -106,3 +120,9 @@ Do not start implementation before reading all 8 files.
 - The first database schema direction was established around `profiles`, `academic_years`, and `subjects`.
 - Prisma Client generation is working and Neon connectivity was successfully established after resolving environment and connection issues.
 - Old Supabase-specific implementation remnants should now be removed or updated where they still exist in the codebase or markdown documentation.
+- Feature 05 added the `Course` model to the Prisma schema and shipped a real student browse flow (academic year → subject → course list) using real Neon-backed Prisma queries, with no mock data.
+- Feature 05 introduced `lib/queries/browse.ts` as the shared, server-only read layer for browse data, used directly by web Server Components.
+- Feature 05 also introduced a mobile-facing API layer under `app/api/browse/` (years, subjects, courses) so the React Native app can consume the exact same query logic over HTTP, avoiding any duplicated Prisma queries between platforms.
+- All new browse-related visible strings were added to both `messages/ar.json` and `messages/en.json` under a new `Browse` namespace, covering headings, empty states, error states, and navigation labels, with Arabic-first defaults preserved.
+- Resolved a Prisma migration drift issue caused by earlier schema changes being applied via `db push` instead of `migrate dev`; `prisma migrate reset` was used safely since only seed data existed at the time.
+- Clarified and formally adopted the cross-platform architecture pattern for all future features: reads in `lib/queries/`, writes in `lib/mutations/`, Server Actions in `actions/` for web-only mutation triggers, and Route Handlers in `app/api/` for mobile and external consumers — this will be the standard going into Feature 06 and beyond.

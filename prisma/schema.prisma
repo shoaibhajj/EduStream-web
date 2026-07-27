@@ -5,6 +5,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  // url      = env("DATABASE_URL")
 }
 
 enum AppRole {
@@ -47,7 +48,27 @@ model Subject {
   createdAt      DateTime     @default(now()) @map("created_at")
 
   academicYear   AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+  courses        Course[]
 
   @@index([academicYearId])
   @@map("subjects")
+}
+
+model Course {
+  id            String   @id @default(cuid())
+  subjectId     String   @map("subject_id")
+  nameAr        String   @map("name_ar")
+  nameEn        String?  @map("name_en")
+  descriptionAr String?  @map("description_ar")
+  descriptionEn String?  @map("description_en")
+  thumbnailUrl  String?  @map("thumbnail_url")
+  isPublished   Boolean  @default(false) @map("is_published")
+  sortOrder     Int      @default(0) @map("sort_order")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  subject       Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@index([subjectId])
+  @@map("courses")
 }

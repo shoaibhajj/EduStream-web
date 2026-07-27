@@ -20,7 +20,7 @@ async function main() {
     },
   });
 
-  await prisma.subject.upsert({
+  const subject = await prisma.subject.upsert({
     where: { id: "foundation-math" },
     update: {},
     create: {
@@ -30,6 +30,22 @@ async function main() {
       nameEn: "Mathematics",
       sortOrder: 1,
       isActive: true,
+    },
+  });
+
+  await prisma.course.upsert({
+    where: { id: "foundation-math-course-01" },
+    update: {},
+    create: {
+      id: "foundation-math-course-01",
+      subjectId: subject.id,
+      nameAr: "الرياضيات الأساسية",
+      nameEn: "Core Mathematics",
+      descriptionAr: "كورس شامل في أساسيات الرياضيات للمرحلة التأسيسية.",
+      descriptionEn:
+        "A comprehensive course covering core mathematics for the foundation year.",
+      isPublished: true,
+      sortOrder: 1,
     },
   });
 }

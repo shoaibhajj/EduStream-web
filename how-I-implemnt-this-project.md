@@ -2180,3 +2180,394 @@ This saves the first real database foundation for the web app using the actual b
 - The `profiles` table should later be connected to Clerk-driven creation/sync flows
 - More tables should only be added when the next product flow truly requires them
 - Visible database-driven UI text must continue to live in locale message files instead of being hardcoded
+
+---
+
+## Feature 05 — Student Browse and Course Discovery Flow
+
+### Goal
+
+Build the real student browse flow for **Moallem Academy** on top of the Neon + Prisma foundation, using:
+
+- a `Course` model added to the existing Prisma schema
+- a shared, server-only read layer for browse data
+- real Server Component pages for academic year → subject → course discovery
+- a mobile-facing API layer that reuses the exact same query logic
+- fully localized browse copy in Arabic and English
+- an architecture pattern for reads vs writes that will apply to all future features
+
+This feature is about wiring up the **first real product flow** end to end, not just database setup.
+
+---
+
+## Decisions used for this feature
+
+- No new database provider changes; Neon + Prisma from Feature 03 stays as-is
+- A `Course` model was added to the schema, linked to `Subject`
+- Course fields were kept minimal on purpose: `nameAr`, `nameEn`, `descriptionAr`, `descriptionEn`, `thumbnailUrl`, `isPublished`, `sortOrder`
+- Price, teacher ownership, and lesson/media fields are intentionally deferred to Feature 07/08
+- All read logic lives in `lib/queries/browse.ts`, marked `server-only`
+- Web pages call these query functions directly from Server Components — no HTTP round trip
+- A parallel `app/api/browse/*` layer was added so the mobile app can reach the same data over HTTP
+- Both the web pages and the API routes call the exact same functions in `lib/queries/browse.ts` — no duplicated Prisma queries
+- All visible browse strings were added to `messages/ar.ts` and `messages/en.ts` under a new `Browse` namespace
+
+---
+
+## Step 1 — Add the `Course` model to the Prisma schema
+
+### File to update
+
+`prisma/schema.prisma`
+
+### Code
+
+```prisma
+model Course {
+  id            String   @id @default(cuid())
+  subjectId     String   @map("subject_id")
+  nameAr        String   @map("name_ar")
+  nameEn        String?  @map("name_en")
+  descriptionAr String?  @map("description_ar")
+  descriptionEn String?  @map("description_en")
+  thumbnailUrl  String?  @map("thumbnail_url")
+  isPublished   Boolean  @default(false) @map("is_published")
+  sortOrder     Int      @default(0) @map("sort_order")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  subject       Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@index([subjectId])
+  @@map("courses")
+}
+```
+
+Also add the inverse relation on `Subject`:
+
+```prisma
+model Subject {
+  // ...existing fields
+  courses Course[]
+}
+```
+
+### Why this matters
+
+This is the first entity in the browse hierarchy that represents actual purchasable/learnable product content, kept intentionally thin so it doesn't get ahead of Feature 07 (teacher course management) and Feature 08 (media sources).
+
+---
+
+## Step 2 — Resolve migration drift and apply the schema change
+
+### Problem encountered
+
+Earlier schema changes had been applied with `prisma db push` instead of `prisma migrate dev`, which caused Prisma to detect drift between the migration history and the actual Neon database state.
+
+### Command
+
+```bash
+npx prisma migrate reset
+npx prisma migrate dev --name add_course_model
+```
+
+### Why this matters
+
+`migrate reset` was safe to run at this stage because only seed data existed — no real user data was at risk. Moving to proper `migrate dev` from this point forward keeps schema history clean and avoids drift errors in future features.
+
+### Verify
+
+```bash
+npx prisma studio
+```
+
+Confirm the `courses` table exists and is empty, then re-run the seed if needed.
+
+---
+
+## Step 3 — Extend the seed with a real course
+
+### File to update
+
+`prisma/seed.ts`
+
+### Code (added to `main()`)
+
+```ts
+await prisma.course.upsert({
+  where: { id: "foundation-math-course-01" },
+  update: {},
+  create: {
+    id: "foundation-math-course-01",
+    subjectId: "foundation-math",
+    nameAr: "الرياضيات الأساسية",
+    nameEn: "Core Mathematics",
+    descriptionAr: "كورس شامل في أساسيات الرياضيات للمرحلة التأسيسية.",
+    descriptionEn: "A comprehensive course covering core mathematics for the foundation year.",
+    isPublished: true,
+    sortOrder: 1,
+  },
+});
+```
+
+### Command
+
+```bash
+npx prisma db seed
+```
+
+### Why this matters
+
+The browse flow needs at least one real, published course to verify the full year → subject → course path end to end without relying on mock data.
+
+---
+
+## Step 4 — Create the shared browse query layer
+
+### File to create
+
+`lib/queries/browse.ts`
+
+### Code
+
+```ts
+import "server-only";
+import { prisma } from "@/lib/prisma";
+
+export async function getActiveAcademicYears() {
+  return prisma.academicYear.findMany({
+    where: { isActive: true },
+    orderBy: { sortOrder: "asc" },
+  });
+}
+
+export async function getSubjectsByYear(academicYearId: string) {
+  return prisma.subject.findMany({
+    where: { academicYearId, isActive: true },
+    orderBy: { sortOrder: "asc" },
+  });
+}
+
+export async function getPublishedCoursesBySubject(subjectId: string) {
+  return prisma.course.findMany({
+    where: { subjectId, isPublished: true },
+    orderBy: { sortOrder: "asc" },
+  });
+}
+```
+
+### Why this matters
+
+This is the single source of truth for all browse-related reads. The `server-only` import guarantees this file can never be accidentally bundled into client-side code. Both the web Server Components and the mobile-facing API routes call these same three functions — no query logic is ever duplicated between platforms.
+
+---
+
+## Step 5 — Add localized browse copy
+
+### Files to update
+
+- `messages/ar.ts`
+- `messages/en.ts`
+
+### Code (added under a new `Browse` namespace)
+
+```ts
+// messages/ar.ts
+Browse: {
+  years: {
+    title: "اختر السنة الدراسية",
+    empty: "لا توجد سنوات دراسية متاحة حالياً.",
+  },
+  subjects: {
+    title: "اختر المادة",
+    empty: "لا توجد مواد متاحة لهذه السنة الدراسية.",
+  },
+  courses: {
+    title: "الكورسات المتاحة",
+    empty: "لا توجد كورسات منشورة لهذه المادة حالياً.",
+  },
+  errors: {
+    loadFailed: "تعذر تحميل البيانات، حاول مرة أخرى.",
+  },
+},
+```
+
+```ts
+// messages/en.ts
+Browse: {
+  years: {
+    title: "Choose an academic year",
+    empty: "No academic years are available right now.",
+  },
+  subjects: {
+    title: "Choose a subject",
+    empty: "No subjects are available for this academic year.",
+  },
+  courses: {
+    title: "Available courses",
+    empty: "No published courses are available for this subject yet.",
+  },
+  errors: {
+    loadFailed: "Failed to load data, please try again.",
+  },
+},
+```
+
+### Why this matters
+
+Every visible string in the browse flow — including empty and error states — is localized from the start, keeping Arabic as the default experience and avoiding hardcoded English fallback text anywhere in the flow.
+
+---
+
+## Step 6 — Build the student browse pages
+
+### Files to create
+
+- `app/[locale]/(student)/years/page.tsx`
+- `app/[locale]/(student)/years/[yearId]/subjects/page.tsx`
+- `app/[locale]/(student)/subjects/[subjectId]/courses/page.tsx`
+
+### Pattern used (example: subjects page)
+
+```ts
+import { getSubjectsByYear } from "@/lib/queries/browse";
+import { getTranslations } from "next-intl/server";
+
+type Props = {
+  params: Promise<{ yearId: string }>;
+};
+
+export default async function SubjectsPage({ params }: Props) {
+  const { yearId } = await params;
+  const t = await getTranslations("Browse.subjects");
+  const subjects = await getSubjectsByYear(yearId);
+
+  return (
+    <main className="mx-auto max-w-5xl px-6 py-10">
+      <h1 className="text-2xl font-semibold text-text-primary">{t("title")}</h1>
+
+      {subjects.length === 0 ? (
+        <p className="mt-6 text-text-secondary">{t("empty")}</p>
+      ) : (
+        <ul className="mt-6 grid gap-4 sm:grid-cols-2">
+          {subjects.map((subject) => (
+            <li key={subject.id} className="rounded-lg border border-border bg-surface p-4">
+              {subject.nameAr}
+            </li>
+          ))}
+        </ul>
+      )}
+    </main>
+  );
+}
+```
+
+### Why this matters
+
+Each page is a Server Component that calls `lib/queries/browse.ts` directly — no client-side fetch, no API round trip for the web experience. This is the fastest possible data path for a read-only student flow.
+
+---
+
+## Step 7 — Build the mobile-facing browse API
+
+### Files to create
+
+- `app/api/browse/years/route.ts`
+- `app/api/browse/years/[yearId]/subjects/route.ts`
+- `app/api/browse/subjects/[subjectId]/courses/route.ts`
+
+### Code (example: subjects route)
+
+```ts
+import { NextResponse } from "next/server";
+import { getSubjectsByYear } from "@/lib/queries/browse";
+
+export async function GET(
+  request: Request,
+  { params }: { params: Promise<{ yearId: string }> }
+) {
+  const { yearId } = await params;
+
+  try {
+    const subjects = await getSubjectsByYear(yearId);
+    return NextResponse.json({ subjects });
+  } catch (error) {
+    console.error("GET /api/browse/years/[yearId]/subjects failed:", error);
+    return NextResponse.json({ error: "load_failed" }, { status: 500 });
+  }
+}
+```
+
+The `years` and `subjects/[subjectId]/courses` routes follow the same pattern, calling `getActiveAcademicYears()` and `getPublishedCoursesBySubject()` respectively.
+
+### Why this matters
+
+This is the only way the React Native mobile app can reach browse data, since it cannot import Server Components or `server-only` files directly. Every route is a thin wrapper — no business logic lives here, only the HTTP boundary.
+
+### Common mistake hit during this feature
+
+An earlier attempt placed `route.ts` at `app/api/browse/years/subjects/route.ts` instead of nested inside the dynamic segment at `app/api/browse/years/[yearId]/subjects/route.ts`. This caused `/api/browse/years/foundation-year-2025/subjects` to 404, because there was no `[yearId]` folder in the path to match against. Fixed by deleting the misplaced folder and recreating the correct nested structure.
+
+---
+
+## Step 8 — Local verification used for this feature
+
+### Commands
+
+```bash
+npm run dev
+```
+
+```bash
+curl http://localhost:3000/api/browse/years
+curl http://localhost:3000/api/browse/years/foundation-year-2025/subjects
+curl http://localhost:3000/api/browse/subjects/foundation-math/courses
+```
+
+### What to verify
+
+- `/ar/years` renders the seeded academic year in Arabic
+- `/ar/years/foundation-year-2025/subjects` renders the seeded subject
+- `/ar/subjects/foundation-math/courses` renders the seeded course
+- all three `curl` calls return clean JSON, not an HTML 404 page
+- empty states render correctly when a year/subject has no children
+- no Prisma import errors appear in client-side bundles
+
+---
+
+## Step 9 — Commit the browse flow
+
+### Command
+
+```bash
+git add .
+git commit -m "feat(05): student browse and course discovery flow"
+git push origin main
+```
+
+### Why this matters
+
+This saves the first real end-to-end product flow, along with the shared query pattern that all future features (07, 08, 09) will follow for both web and mobile.
+
+---
+
+## Feature 05 completion checklist
+
+- [x] `Course` model added to Prisma schema and linked to `Subject`
+- [x] Migration drift resolved and clean `migrate dev` history established going forward
+- [x] Seed data extended with a real published course
+- [x] `lib/queries/browse.ts` created as the single shared read layer
+- [x] Student browse pages built as Server Components with zero client-side fetching
+- [x] Mobile-facing `app/api/browse/*` routes added, reusing the same query functions
+- [x] All browse copy localized in Arabic and English, including empty/error states
+- [x] No duplicated Prisma queries between web and mobile paths
+- [x] Folder-routing mistake identified and fixed (`[yearId]` nesting)
+
+---
+
+## Notes for future features
+
+- The cross-platform pattern established here — reads in `lib/queries/`, writes in `lib/mutations/`, `actions/` for web-only Server Action mutation triggers, `app/api/` for mobile/external HTTP access — should be followed starting with Feature 06 and onward.
+- Feature 06 (course detail/preview/access states) should extend `lib/queries/browse.ts` or add a new `lib/queries/courses.ts` rather than querying Prisma directly from pages.
+- Feature 07 (teacher course management) will be the first feature to introduce real mutations, and should introduce `lib/mutations/courses.ts` alongside a matching `actions/teacher/*` Server Action layer and `app/api/teacher/*` route layer.
+- Always double-check dynamic route folder nesting (e.g. `[yearId]`) with `find` or `ls -R` after creating API routes by hand, since misplaced folders fail silently with a 404 rather than a build error.

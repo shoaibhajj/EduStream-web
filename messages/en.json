@@ -27,5 +27,18 @@
     "error": "Could not load data",
     "empty": "No academic years yet",
     "yearsHeading": "Available academic years"
+  },
+  "Browse": {
+    "pageTitle": "Browse Courses",
+    "yearsHeading": "Select an academic year",
+    "subjectsHeading": "Select a subject",
+    "coursesHeading": "Available courses",
+    "emptyYears": "No academic years available yet",
+    "emptySubjects": "No subjects for this year yet",
+    "emptyCourses": "No published courses for this subject yet",
+    "errorLoad": "Could not load data, please try again",
+    "backToYears": "Back to academic years",
+    "backToSubjects": "Back to subjects",
+    "viewCourse": "View course"
   }
 }
