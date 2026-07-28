@@ -1,7 +1,9 @@
 import { cn } from "@/lib/utils";
 
 interface EmptyStateProps {
-  message: string;
+  message?: string;
+  title?: string;
+  description?: string;
   icon?: React.ReactNode;
   action?: React.ReactNode;
   className?: string;
@@ -9,10 +11,15 @@ interface EmptyStateProps {
 
 export function EmptyState({
   message,
+  title,
+  description,
   icon,
   action,
   className,
 }: EmptyStateProps) {
+  const resolvedTitle = title;
+  const resolvedDescription = description ?? message;
+
   return (
     <div
       className={cn(
@@ -20,9 +27,23 @@ export function EmptyState({
         className
       )}
     >
-      {icon && <span className="text-text-muted [&>svg]:size-8">{icon}</span>}
-      <p className="text-sm text-text-muted max-w-xs">{message}</p>
-      {action && <div>{action}</div>}
+      {icon ? (
+        <span className="text-text-muted [&>svg]:size-8">{icon}</span>
+      ) : null}
+
+      {resolvedTitle ? (
+        <h3 className="text-base font-medium text-text-primary">
+          {resolvedTitle}
+        </h3>
+      ) : null}
+
+      {resolvedDescription ? (
+        <p className="max-w-xs text-sm text-text-muted">
+          {resolvedDescription}
+        </p>
+      ) : null}
+
+      {action ? <div>{action}</div> : null}
     </div>
   );
 }

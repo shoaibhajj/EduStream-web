@@ -8,10 +8,10 @@
     "startNow": "ابدأ الآن"
   },
   "StudentDashboard": {
-  "brand": "أكاديمية المعلم",
-  "greeting": "مرحباً، {name}",
-  "defaultName": "طالب"
-},
+    "brand": "أكاديمية المعلم",
+    "greeting": "مرحباً، {name}",
+    "defaultName": "طالب"
+  },
   "auth": {
     "signIn": {
       "title": "مرحباً بعودتك",
@@ -60,5 +60,43 @@
     "notFoundTitle": "الكورس غير موجود",
     "notFoundDescription": "لا يمكن العثور على هذا الكورس أو أنه غير منشور.",
     "errorLoad": "تعذّر تحميل بيانات الكورس، يرجى المحاولة مجدداً"
+  },
+  "TeacherDashboard": {
+    "pageTitle": "لوحة تحكم المعلم",
+    "myCourses": "كورساتي",
+    "createCourse": "إنشاء كورس",
+    "editCourse": "تعديل الكورس",
+    "publish": "نشر",
+    "moveToDraft": "تحويل إلى مسودة",
+    "published": "منشور",
+    "draft": "مسودة",
+    "emptyTitle": "لا توجد كورسات بعد",
+    "emptyDescription": "ابدأ بإنشاء أول كورس لك لإدارة المحتوى لاحقاً.",
+    "nameFallback": "معلم",
+    "lessonsCount": "عدد الدروس: {count}",
+    "enrollmentsCount": "عدد الطلاب: {count}",
+    "subjectLabel": "المادة",
+    "academicYearLabel": "السنة الدراسية",
+    "form": {
+      "nameAr": "اسم الكورس بالعربية",
+      "nameEn": "اسم الكورس بالإنجليزية",
+      "descriptionAr": "وصف الكورس بالعربية",
+      "descriptionEn": "وصف الكورس بالإنجليزية",
+      "subject": "المادة الدراسية",
+      "selectSubject": "اختر المادة الدراسية",
+      "price": "السعر",
+      "save": "حفظ",
+      "create": "إنشاء الكورس",
+      "update": "حفظ التعديلات",
+      "saving": "جارٍ الحفظ...",
+      "priceHint": "اكتب 0 إذا كان الكورس مجانياً",
+      "validationRequired": "هذا الحقل مطلوب",
+      "validationPrice": "يجب أن يكون السعر صفراً أو أكثر",
+      "serverError": "حدث خطأ، يرجى المحاولة مرة أخرى"
+    },
+    "backToDashboard": "العودة إلى لوحة التحكم",
+    "viewDetails": "عرض التفاصيل",
+    "priceLabel": "السعر",
+    "freeLabel": "مجاني"
   }
 }

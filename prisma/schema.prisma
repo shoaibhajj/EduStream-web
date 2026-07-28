@@ -70,6 +70,7 @@ model Course {
   descriptionAr String?  @map("description_ar")
   descriptionEn String?  @map("description_en")
   thumbnailUrl  String?  @map("thumbnail_url")
+   price         Int      @default(0)        
   isPublished   Boolean  @default(false) @map("is_published")
   sortOrder     Int      @default(0) @map("sort_order")
   createdAt     DateTime @default(now()) @map("created_at")
@@ -80,6 +81,7 @@ model Course {
   enrollments   Enrollment[]
 
   @@index([subjectId])
+    @@index([teacherId]) 
   @@map("courses")
 }
 

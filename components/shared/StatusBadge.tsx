@@ -6,7 +6,9 @@ type BadgeVariant =
   | "locked"
   | "pending"
   | "confirmed"
-  | "rejected";
+  | "rejected"
+  | "success"
+  | "secondary";
 
 interface StatusBadgeProps {
   variant: BadgeVariant;
@@ -22,6 +24,8 @@ const variantStyles: Record<BadgeVariant, string> = {
   pending: "bg-warning/10 text-warning",
   confirmed: "bg-success-light text-success",
   rejected: "bg-error/10 text-error",
+  success: "bg-success-light text-success",
+  secondary: "bg-surface-secondary text-text-secondary",
 };
 
 export function StatusBadge({

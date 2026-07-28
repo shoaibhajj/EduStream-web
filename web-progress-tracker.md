@@ -7,8 +7,8 @@ Update this file after each completed feature.
 ## Current Status
 Phase: Phase 2 — Core Product Flows
 Current Goal: Continue deeper product flows on top of the established shared web design-system foundation so future work stays consistent, RTL-safe, localized, and easier to evolve
-Last completed: 07 — Establish Web Design System and Shared UI Components
-Next up: 08 — Teacher Dashboard and Course Management Flow
+Last completed: 08 — Teacher Dashboard and Course Management Flow
+Next up: 09 — Course Media Source System (Cloudinary Upload + External Links)
 
 ## Required First Read
 Before starting any feature, the AI agent must read these 8 files from the repo first:
@@ -59,7 +59,7 @@ Do not start implementation before reading all 8 files.
 - [x] 05 — Student Browse and Course Discovery Flow
 - [x] 06 — Course Detail, Preview, and Access States
 - [x] 07 — Establish Web Design System and Shared UI Components
-- [ ] 08 — Teacher Dashboard and Course Management Flow
+- [x] 08 — Teacher Dashboard and Course Management Flow
 - [ ] 09 — Course Media Source System (Cloudinary Upload + External Links)
 - [ ] 10 — Manual Payment and Access Confirmation Web Flows
 
@@ -83,11 +83,9 @@ Do not start implementation before reading all 8 files.
 - Confirm whether Cloudinary is the only upload provider for owned video/media assets.
 - Confirm how preview/free-lesson media should be modeled across uploaded and linked content.
 - Confirm whether Neon + Prisma is the permanent shared backend direction for web only, or whether future mobile/backend alignment will also move away from Supabase.
-- Confirm whether mobile API routes need authentication (Clerk token verification) starting with Feature 08, or whether this is deferred until Feature 10 (payment/access confirmation).
-- Confirm final folder naming convention (`lib/mutations/` vs `lib/actions-core/`, etc.) before Feature 08 introduces the first real mutation-heavy teacher flow.
-- Confirm ownership enforcement rules for `Course.teacherId` before Feature 08 allows teachers to create/edit courses.
-- Confirm whether `Lesson.videoUrl` stays a plain string placeholder or needs an early enum/type hint before Feature 09 introduces multi-source media.
-- Confirm whether any additional shared form abstractions should be added on top of the current component layer before Feature 08 expands teacher-facing create/edit flows.
+- Confirm whether mobile API routes need authentication (Clerk token verification) starting with Feature 09, or whether this remains deferred until Feature 10 (payment/access confirmation).
+- Confirm whether `Lesson.videoUrl` stays a plain string placeholder or should be formally replaced/extended by a multi-source media model in Feature 09.
+- Confirm whether additional shared media/admin form abstractions should be added on top of the current component layer as Feature 09 expands teacher-facing workflows.
 
 ## Architecture Decisions
 - Web starts now because the mobile side is stable enough for aligned implementation.
@@ -129,6 +127,10 @@ Do not start implementation before reading all 8 files.
 - Link-style navigation that looks like a button should follow the current shadcn guidance by using `buttonVariants(...)` on links rather than relying on non-guaranteed `asChild` support in local button implementations.
 - Tailwind v4 theming and project tokens must remain aligned with the Moallem Academy palette from `web-ui-context.md`, while shadcn semantic variables continue to be mapped into that same product design direction.
 - Arabic-first layout, English parity, localization discipline, accessibility, and RTL-safe interaction behavior are all part of the design-system contract and must be preserved in every subsequent feature.
+- Feature 08 completed the first real mutation-heavy teacher flow using the agreed shared architecture: teacher-facing reads in `lib/queries/teacher.ts`, business logic in `lib/mutations/course.ts`, thin web-only Server Actions in `actions/course.ts`, and a mobile-consumable Route Handler in `app/api/teacher/courses/route.ts`.
+- Feature 08 confirmed ownership enforcement for teacher-managed courses by scoping reads and writes to `Course.teacherId` (Clerk user ID), preventing teachers from reading or mutating other teachers’ course records through the dashboard flow.
+- Feature 08 introduced a minimal schema extension for teacher course management by adding `Course.price` plus a teacher query index, while intentionally deferring lesson media/source modeling to Feature 09.
+- Feature 08 established the teacher web UX pattern of separate create, read-only details, and edit pages, with redirect-to-dashboard behavior after successful create/update mutations.
 
 ## Session Notes
 - Mobile side is now stable enough to begin web implementation.
@@ -164,3 +166,7 @@ Do not start implementation before reading all 8 files.
 - Feature 07 confirmed the project should use `buttonVariants(...)` on navigation links styled as buttons, matching current shadcn guidance and avoiding reliance on inconsistent local `asChild` support.
 - Feature 07 preserved Arabic-first behavior, English parity, RTL-safe layout patterns, and localization discipline while establishing the reusable UI base.
 - Starting with Feature 08, every new screen and refactor should build through the shared shadcn/ui + `components/shared/*` layer first, rather than introducing parallel component conventions.
+- Feature 08 is now complete and verified locally.
+- Feature 08 shipped a real teacher dashboard backed by Neon through Prisma, with teacher-scoped course reads, real create/update/publish flows, localized Arabic-first teacher pages, and shared UI-based empty/state/form patterns instead of mock data or isolated page markup.
+- Feature 08 added shared teacher course management architecture for both web and future mobile consumers: `lib/queries/teacher.ts`, `lib/mutations/course.ts`, `actions/course.ts`, and `app/api/teacher/courses/route.ts`.
+- Feature 08 expanded the teacher UX beyond raw form entry by adding dashboard-visible course metadata, a read-only teacher course details page, dashboard return flows after create/edit, and continued use of the shared shadcn-based design system.

@@ -6,11 +6,12 @@
     "signIn": "Sign in",
     "signUp": "Sign up",
     "startNow": "Get started"
-  },"StudentDashboard": {
-  "brand": "Moallem Academy",
-  "greeting": "Welcome, {name}",
-  "defaultName": "Student"
-},
+  },
+  "StudentDashboard": {
+    "brand": "Moallem Academy",
+    "greeting": "Welcome, {name}",
+    "defaultName": "Student"
+  },
   "auth": {
     "signIn": {
       "title": "Welcome back",
@@ -59,5 +60,43 @@
     "notFoundTitle": "Course not found",
     "notFoundDescription": "This course could not be found or is not published.",
     "errorLoad": "Could not load course data, please try again"
+  },
+  "TeacherDashboard": {
+    "pageTitle": "Teacher Dashboard",
+    "myCourses": "My Courses",
+    "createCourse": "Create Course",
+    "editCourse": "Edit Course",
+    "publish": "Publish",
+    "moveToDraft": "Move to Draft",
+    "published": "Published",
+    "draft": "Draft",
+    "emptyTitle": "No courses yet",
+    "emptyDescription": "Start by creating your first course so you can manage its content later.",
+    "nameFallback": "Teacher",
+    "lessonsCount": "Lessons: {count}",
+    "enrollmentsCount": "Students: {count}",
+    "subjectLabel": "Subject",
+    "academicYearLabel": "Academic year",
+    "form": {
+      "nameAr": "Course name in Arabic",
+      "nameEn": "Course name in English",
+      "descriptionAr": "Course description in Arabic",
+      "descriptionEn": "Course description in English",
+      "subject": "Subject",
+      "selectSubject": "Select a subject",
+      "price": "Price",
+      "save": "Save",
+      "create": "Create course",
+      "update": "Save changes",
+      "saving": "Saving...",
+      "priceHint": "Enter 0 if the course is free",
+      "validationRequired": "This field is required",
+      "validationPrice": "Price must be zero or more",
+      "serverError": "Something went wrong, please try again"
+    },
+    "backToDashboard": "Back to dashboard",
+    "viewDetails": "View details",
+    "priceLabel": "Price",
+    "freeLabel": "Free"
   }
 }

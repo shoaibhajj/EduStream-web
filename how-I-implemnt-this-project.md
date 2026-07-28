@@ -3740,3 +3740,1219 @@ This saves the shared UI foundation before later features build more business-sp
 - Later features should keep building on `components/ui/*` before introducing page-local one-off primitives.
 - If a future feature needs richer form handling, `form`, `select`, `dialog`, and `popover` can be added through shadcn/ui in the same shared pattern.
 - Feature 08 and onward should treat Feature 07 as the visual foundation layer, not rebuild base controls from scratch.
+
+
+
+---
+
+## Feature 08 — Teacher Dashboard and Course Management Flow
+
+### Goal
+
+Build the real teacher dashboard and course management flow for **Moallem Academy** on top of the current Neon + Prisma foundation, using:
+
+- real teacher-owned course reads from Neon through Prisma
+- real course create / edit / publish mutations
+- the shared cross-platform architecture:
+  - `lib/queries/*` for reads
+  - `lib/mutations/*` for business logic writes
+  - `actions/*` for thin web-only Server Action wrappers
+  - `app/api/*` for thin mobile/external Route Handler wrappers
+- the shared shadcn-based design system established in Feature 07
+- localized visible text in Arabic and English
+- RTL-safe teacher-facing UI
+- a clean base for future lesson/media work without implementing Feature 09 yet
+
+This feature is about **teacher course management**, not the later media upload system, payment/access workflow, or playback/protection work.
+
+---
+
+## Decisions used for this feature
+
+- Feature 07 is the active visual foundation, so all new teacher pages must reuse shared UI primitives instead of introducing page-specific markup.
+- Neon + Prisma remains the active database path.
+- `Course.teacherId` already existed from Feature 06, so ownership could be implemented without inventing a new teacher-only relation model.
+- `Course.price` was added now as a small forward-compatible field so Feature 10 does not need to reopen the course basics schema for pricing.
+- `teacherId` continues to store the Clerk user ID directly as the ownership key for web and future mobile/API reuse.
+- Teacher reads were centralized in `lib/queries/teacher.ts`.
+- Teacher write business logic was centralized in `lib/mutations/course.ts`.
+- Web forms and buttons call thin wrappers in `actions/course.ts`.
+- A mobile-facing teacher API route was added at `app/api/teacher/courses/route.ts`, reusing the same query layer.
+- The teacher dashboard was built with the existing shared UI system: `Button`, `Card`, `Badge`, `Input`, `Textarea`, `Select`, `Label`, `EmptyState`, and `SectionCard`.
+- All new visible strings were added to localization files under a new `TeacherDashboard` namespace.
+- Full mobile/API auth hardening for teacher routes is intentionally deferred to a later feature; this feature only exposes the shared data path.
+
+---
+
+## Step 1 — Add missing shared shadcn form primitives
+
+### Command
+
+```bash
+npx shadcn@latest add label
+npx shadcn@latest add form
+npm install react-hook-form @hookform/resolvers zod
+```
+
+### Files created or updated
+
+- `components/ui/label.tsx`
+- `components/ui/form.tsx`
+
+### Why this matters
+
+Feature 08 needs real create/edit course forms, and those forms should be built from the shared UI layer instead of local one-off labels and wrappers.  
+This keeps the teacher flow aligned with the shared design system established in Feature 07.
+
+---
+
+## Step 2 — Extend the Prisma schema minimally for teacher course management
+
+### File to update
+
+`prisma/schema.prisma`
+
+### Code
+
+Add the `price` field and teacher index to `Course`:
+
+```prisma
+model Course {
+  id            String   @id @default(cuid())
+  subjectId     String   @map("subject_id")
+  teacherId     String?  @map("teacher_id")
+  nameAr        String   @map("name_ar")
+  nameEn        String?  @map("name_en")
+  descriptionAr String?  @map("description_ar")
+  descriptionEn String?  @map("description_en")
+  thumbnailUrl  String?  @map("thumbnail_url")
+  price         Int      @default(0)
+  isPublished   Boolean  @default(false) @map("is_published")
+  sortOrder     Int      @default(0) @map("sort_order")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  subject       Subject      @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  lessons       Lesson[]
+  enrollments   Enrollment[]
+
+  @@index([subjectId])
+  @@index([teacherId])
+  @@map("courses")
+}
+```
+
+### Command
+
+```bash
+npx prisma migrate dev --name add_course_price_and_teacher_index
+npx prisma generate
+```
+
+### Why this matters
+
+Feature 08 needs only a small schema extension, not a full new teacher-content model.  
+Adding `price` now avoids later schema churn, and indexing `teacherId` keeps teacher dashboard queries efficient as data grows.
+
+---
+
+## Step 3 — Create the shared teacher read layer
+
+### File to create
+
+`lib/queries/teacher.ts`
+
+### Code
+
+```ts
+import "server-only";
+import { prisma } from "@/lib/prisma";
+
+export async function getTeacherCourses(clerkUserId: string) {
+  return prisma.course.findMany({
+    where: { teacherId: clerkUserId },
+    include: {
+      subject: {
+        include: { academicYear: true },
+      },
+      _count: {
+        select: {
+          lessons: true,
+          enrollments: true,
+        },
+      },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
+export async function getTeacherCourseById(
+  courseId: string,
+  clerkUserId: string
+) {
+  return prisma.course.findFirst({
+    where: {
+      id: courseId,
+      teacherId: clerkUserId,
+    },
+    include: {
+      subject: {
+        include: { academicYear: true },
+      },
+    },
+  });
+}
+
+export async function getSubjectsForCourseForm() {
+  return prisma.subject.findMany({
+    where: { isActive: true },
+    include: {
+      academicYear: {
+        select: {
+          id: true,
+          nameAr: true,
+          nameEn: true,
+        },
+      },
+    },
+    orderBy: [
+      { academicYear: { sortOrder: "asc" } },
+      { sortOrder: "asc" },
+    ],
+  });
+}
+```
+
+### Why this matters
+
+This becomes the single shared source of truth for teacher-facing read operations.  
+Both the web teacher dashboard and the future mobile app can reuse this read layer without duplicating Prisma queries.
+
+---
+
+## Step 4 — Create the shared teacher mutation layer
+
+### File to create
+
+`lib/mutations/course.ts`
+
+### Code
+
+```ts
+import { prisma } from "@/lib/prisma";
+
+export type CreateCourseInput = {
+  teacherId: string;
+  subjectId: string;
+  nameAr: string;
+  nameEn?: string;
+  descriptionAr?: string;
+  descriptionEn?: string;
+  price?: number;
+};
+
+export async function createCourse(input: CreateCourseInput) {
+  return prisma.course.create({
+    data: {
+      teacherId: input.teacherId,
+      subjectId: input.subjectId,
+      nameAr: input.nameAr,
+      nameEn: input.nameEn ?? null,
+      descriptionAr: input.descriptionAr ?? null,
+      descriptionEn: input.descriptionEn ?? null,
+      price: input.price ?? 0,
+      isPublished: false,
+    },
+  });
+}
+
+export type UpdateCourseBasicsInput = {
+  courseId: string;
+  teacherId: string;
+  subjectId?: string;
+  nameAr?: string;
+  nameEn?: string;
+  descriptionAr?: string;
+  descriptionEn?: string;
+  price?: number;
+};
+
+export async function updateCourseBasics(input: UpdateCourseBasicsInput) {
+  const existing = await prisma.course.findFirst({
+    where: {
+      id: input.courseId,
+      teacherId: input.teacherId,
+    },
+    select: { id: true },
+  });
+
+  if (!existing) {
+    throw new Error("NOT_FOUND_OR_FORBIDDEN");
+  }
+
+  return prisma.course.update({
+    where: { id: input.courseId },
+    data: {
+      ...(input.subjectId && { subjectId: input.subjectId }),
+      ...(input.nameAr !== undefined && { nameAr: input.nameAr }),
+      ...(input.nameEn !== undefined && { nameEn: input.nameEn }),
+      ...(input.descriptionAr !== undefined && {
+        descriptionAr: input.descriptionAr,
+      }),
+      ...(input.descriptionEn !== undefined && {
+        descriptionEn: input.descriptionEn,
+      }),
+      ...(input.price !== undefined && { price: input.price }),
+    },
+  });
+}
+
+export async function toggleCoursePublish(courseId: string, teacherId: string) {
+  const course = await prisma.course.findFirst({
+    where: {
+      id: courseId,
+      teacherId,
+    },
+    select: {
+      id: true,
+      isPublished: true,
+    },
+  });
+
+  if (!course) {
+    throw new Error("NOT_FOUND_OR_FORBIDDEN");
+  }
+
+  return prisma.course.update({
+    where: { id: courseId },
+    data: {
+      isPublished: !course.isPublished,
+    },
+  });
+}
+```
+
+### Why this matters
+
+All actual business rules for course ownership, creation, editing, and publish state live here once.  
+This prevents the web action layer and mobile API layer from drifting apart or bypassing ownership checks.
+
+---
+
+## Step 5 — Add thin web-only Server Action wrappers
+
+### File to create
+
+`actions/course.ts`
+
+### Code
+
+```ts
+"use server";
+
+import { auth } from "@clerk/nextjs/server";
+import { redirect } from "next/navigation";
+import { z } from "zod";
+import {
+  createCourse,
+  toggleCoursePublish,
+  updateCourseBasics,
+} from "@/lib/mutations/course";
+
+const CreateCourseSchema = z.object({
+  subjectId: z.string().min(1),
+  nameAr: z.string().min(1),
+  nameEn: z.string().optional(),
+  descriptionAr: z.string().optional(),
+  descriptionEn: z.string().optional(),
+  price: z.coerce.number().int().min(0).optional(),
+});
+
+export async function createCourseAction(_: unknown, formData: FormData) {
+  const { userId } = await auth();
+
+  if (!userId) {
+    redirect("/sign-in");
+  }
+
+  const parsed = CreateCourseSchema.safeParse({
+    subjectId: formData.get("subjectId"),
+    nameAr: formData.get("nameAr"),
+    nameEn: formData.get("nameEn") || undefined,
+    descriptionAr: formData.get("descriptionAr") || undefined,
+    descriptionEn: formData.get("descriptionEn") || undefined,
+    price: formData.get("price") || undefined,
+  });
+
+  if (!parsed.success) {
+    return { success: false, error: "VALIDATION_ERROR" };
+  }
+
+  try {
+    const course = await createCourse({
+      teacherId: userId,
+      ...parsed.data,
+    });
+
+    return { success: true, courseId: course.id };
+  } catch {
+    return { success: false, error: "SERVER_ERROR" };
+  }
+}
+
+const UpdateCourseSchema = CreateCourseSchema.extend({
+  courseId: z.string().min(1),
+});
+
+export async function updateCourseAction(_: unknown, formData: FormData) {
+  const { userId } = await auth();
+
+  if (!userId) {
+    redirect("/sign-in");
+  }
+
+  const parsed = UpdateCourseSchema.safeParse({
+    courseId: formData.get("courseId"),
+    subjectId: formData.get("subjectId") || undefined,
+    nameAr: formData.get("nameAr"),
+    nameEn: formData.get("nameEn") || undefined,
+    descriptionAr: formData.get("descriptionAr") || undefined,
+    descriptionEn: formData.get("descriptionEn") || undefined,
+    price: formData.get("price") || undefined,
+  });
+
+  if (!parsed.success) {
+    return { success: false, error: "VALIDATION_ERROR" };
+  }
+
+  try {
+    await updateCourseBasics({
+      teacherId: userId,
+      ...parsed.data,
+    });
+
+    return { success: true };
+  } catch (error) {
+    if (error instanceof Error && error.message === "NOT_FOUND_OR_FORBIDDEN") {
+      return { success: false, error: "FORBIDDEN" };
+    }
+
+    return { success: false, error: "SERVER_ERROR" };
+  }
+}
+
+export async function togglePublishAction(courseId: string) {
+  const { userId } = await auth();
+
+  if (!userId) {
+    redirect("/sign-in");
+  }
+
+  try {
+    const updated = await toggleCoursePublish(courseId, userId);
+    return { success: true, isPublished: updated.isPublished };
+  } catch (error) {
+    if (error instanceof Error && error.message === "NOT_FOUND_OR_FORBIDDEN") {
+      return { success: false, error: "FORBIDDEN" };
+    }
+
+    return { success: false, error: "SERVER_ERROR" };
+  }
+}
+```
+
+### Why this matters
+
+The Server Action layer stays thin and web-only, exactly as required by the shared architecture.  
+It handles auth and input parsing, then delegates all actual business logic to `lib/mutations/course.ts`.
+
+---
+
+## Step 6 — Add a mobile-facing teacher API route
+
+### File to create
+
+`app/api/teacher/courses/route.ts`
+
+### Code
+
+```ts
+import { NextRequest, NextResponse } from "next/server";
+import { getTeacherCourses } from "@/lib/queries/teacher";
+
+export async function GET(request: NextRequest) {
+  const teacherId = request.nextUrl.searchParams.get("teacherId");
+
+  if (!teacherId) {
+    return NextResponse.json(
+      { error: "teacherId is required" },
+      { status: 400 }
+    );
+  }
+
+  try {
+    const courses = await getTeacherCourses(teacherId);
+    return NextResponse.json({ courses });
+  } catch {
+    return NextResponse.json(
+      { error: "Failed to fetch courses" },
+      { status: 500 }
+    );
+  }
+}
+```
+
+### Why this matters
+
+The mobile app cannot import `server-only` query files directly, so it needs an HTTP surface.  
+This route stays intentionally thin and reuses the exact same query logic as the web app.
+
+---
+
+## Step 7 — Add localized teacher dashboard strings
+
+### Files to update
+
+- `messages/ar.json`
+- `messages/en.json`
+
+### Code
+
+`messages/ar.json`
+```json
+"TeacherDashboard": {
+  "pageTitle": "لوحة تحكم المعلم",
+  "myCourses": "كورساتي",
+  "createCourse": "إنشاء كورس جديد",
+  "editCourse": "تعديل الكورس",
+  "publishCourse": "نشر الكورس",
+  "unpublishCourse": "إلغاء النشر",
+  "publishedBadge": "منشور",
+  "draftBadge": "مسودة",
+  "lessonsCount": "{count} درس",
+  "enrollmentsCount": "{count} طالب",
+  "emptyCourses": "لم تقم بإنشاء أي كورس بعد",
+  "emptyCoursesAction": "أنشئ أول كورس لك الآن",
+  "errorLoad": "تعذّر تحميل الكورسات، يرجى المحاولة مجدداً",
+  "form": {
+    "nameAr": "اسم الكورس بالعربي",
+    "nameEn": "اسم الكورس بالإنجليزي (اختياري)",
+    "descriptionAr": "الوصف بالعربي",
+    "descriptionEn": "الوصف بالإنجليزي (اختياري)",
+    "subject": "المادة الدراسية",
+    "selectSubject": "اختر المادة",
+    "price": "السعر (0 = مجاني)",
+    "save": "حفظ",
+    "saving": "جاري الحفظ...",
+    "cancel": "إلغاء",
+    "createSuccess": "تم إنشاء الكورس بنجاح",
+    "updateSuccess": "تم تحديث الكورس بنجاح",
+    "errorRequired": "هذا الحقل مطلوب",
+    "errorServer": "حدث خطأ في الخادم، يرجى المحاولة مجدداً"
+  }
+}
+```
+
+`messages/en.json`
+```json
+"TeacherDashboard": {
+  "pageTitle": "Teacher Dashboard",
+  "myCourses": "My Courses",
+  "createCourse": "Create New Course",
+  "editCourse": "Edit Course",
+  "publishCourse": "Publish Course",
+  "unpublishCourse": "Unpublish",
+  "publishedBadge": "Published",
+  "draftBadge": "Draft",
+  "lessonsCount": "{count} lessons",
+  "enrollmentsCount": "{count} students",
+  "emptyCourses": "You have not created any courses yet",
+  "emptyCoursesAction": "Create your first course now",
+  "errorLoad": "Could not load courses, please try again",
+  "form": {
+    "nameAr": "Course name (Arabic)",
+    "nameEn": "Course name (English, optional)",
+    "descriptionAr": "Description (Arabic)",
+    "descriptionEn": "Description (English, optional)",
+    "subject": "Subject",
+    "selectSubject": "Select a subject",
+    "price": "Price (0 = free)",
+    "save": "Save",
+    "saving": "Saving...",
+    "cancel": "Cancel",
+    "createSuccess": "Course created successfully",
+    "updateSuccess": "Course updated successfully",
+    "errorRequired": "This field is required",
+    "errorServer": "A server error occurred, please try again"
+  }
+}
+```
+
+### Why this matters
+
+Feature 08 introduces a full new teacher-facing flow, and every visible string in that flow must stay localized.  
+This keeps Arabic-first and English-secondary behavior intact and avoids hardcoded text inside components.
+
+---
+
+## Step 8 — Build the shared teacher course form UI
+
+### File to create
+
+`components/teacher/CourseForm.tsx`
+
+### Code
+
+```tsx
+"use client";
+
+import { useActionState } from "react";
+import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
+import { createCourseAction, updateCourseAction } from "@/actions/course";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+type SubjectOption = {
+  id: string;
+  nameAr: string;
+  nameEn: string | null;
+  academicYear: {
+    nameAr: string;
+    nameEn: string | null;
+  };
+};
+
+type Props = {
+  mode: "create" | "edit";
+  locale: string;
+  subjects: SubjectOption[];
+  defaultValues?: {
+    courseId: string;
+    subjectId: string;
+    nameAr: string;
+    nameEn?: string;
+    descriptionAr?: string;
+    descriptionEn?: string;
+    price?: number;
+  };
+};
+
+export function CourseForm({
+  mode,
+  locale,
+  subjects,
+  defaultValues,
+}: Props) {
+  const t = useTranslations("TeacherDashboard");
+  const router = useRouter();
+
+  const action = mode === "create" ? createCourseAction : updateCourseAction;
+  const [state, formAction, isPending] = useActionState(action, null);
+
+  if (state?.success && mode === "create" && state.courseId) {
+    router.push(`/${locale}/teacher/courses/${state.courseId}/edit`);
+  }
+
+  if (state?.success && mode === "edit") {
+    router.refresh();
+  }
+
+  return (
+    <form action={formAction} className="space-y-6">
+      {mode === "edit" && (
+        <input type="hidden" name="courseId" value={defaultValues?.courseId} />
+      )}
+
+      <div className="space-y-2">
+        <Label htmlFor="nameAr">{t("form.nameAr")}</Label>
+        <Input
+          id="nameAr"
+          name="nameAr"
+          defaultValue={defaultValues?.nameAr}
+          required
+          dir="rtl"
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="nameEn">{t("form.nameEn")}</Label>
+        <Input
+          id="nameEn"
+          name="nameEn"
+          defaultValue={defaultValues?.nameEn}
+          dir="ltr"
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="descriptionAr">{t("form.descriptionAr")}</Label>
+        <Textarea
+          id="descriptionAr"
+          name="descriptionAr"
+          defaultValue={defaultValues?.descriptionAr}
+          rows={3}
+          dir="rtl"
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="descriptionEn">{t("form.descriptionEn")}</Label>
+        <Textarea
+          id="descriptionEn"
+          name="descriptionEn"
+          defaultValue={defaultValues?.descriptionEn}
+          rows={3}
+          dir="ltr"
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label>{t("form.subject")}</Label>
+        <Select name="subjectId" defaultValue={defaultValues?.subjectId} required>
+          <SelectTrigger>
+            <SelectValue placeholder={t("form.selectSubject")} />
+          </SelectTrigger>
+          <SelectContent>
+            {subjects.map((subject) => (
+              <SelectItem key={subject.id} value={subject.id}>
+                {locale === "ar"
+                  ? subject.nameAr
+                  : subject.nameEn ?? subject.nameAr}
+                {" — "}
+                {locale === "ar"
+                  ? subject.academicYear.nameAr
+                  : subject.academicYear.nameEn ?? subject.academicYear.nameAr}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="price">{t("form.price")}</Label>
+        <Input
+          id="price"
+          name="price"
+          type="number"
+          min={0}
+          defaultValue={defaultValues?.price ?? 0}
+          dir="ltr"
+        />
+      </div>
+
+      {state?.error && (
+        <p className="text-sm text-error">{t("form.errorServer")}</p>
+      )}
+
+      <div className="flex gap-3">
+        <Button type="submit" disabled={isPending}>
+          {isPending ? t("form.saving") : t("form.save")}
+        </Button>
+
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => router.back()}
+        >
+          {t("form.cancel")}
+        </Button>
+      </div>
+    </form>
+  );
+}
+```
+
+### Why this matters
+
+The create and edit flows use the same form contract, so the UI should also be shared.  
+This keeps form behavior and styling consistent while staying inside the shared design system.
+
+---
+
+## Step 9 — Build the teacher dashboard page
+
+### File to update
+
+`app/[locale]/(teacher)/teacher/page.tsx`
+
+### Code
+
+```tsx
+import Link from "next/link";
+import { currentUser } from "@clerk/nextjs/server";
+import { redirect } from "next/navigation";
+import { getTranslations } from "next-intl/server";
+import { getTeacherCourses } from "@/lib/queries/teacher";
+import { TeacherCourseList } from "@/components/teacher/TeacherCourseList";
+import { EmptyState } from "@/components/shared/EmptyState";
+import { buttonVariants } from "@/components/ui/button";
+
+type Props = {
+  params: Promise<{ locale: string }>;
+};
+
+export default async function TeacherDashboardPage({ params }: Props) {
+  const { locale } = await params;
+  const user = await currentUser();
+
+  if (!user) {
+    redirect(`/${locale}/sign-in`);
+  }
+
+  const t = await getTranslations("TeacherDashboard");
+  const courses = await getTeacherCourses(user.id);
+
+  return (
+    <main className="min-h-screen bg-background p-6 md:p-10">
+      <div className="mx-auto max-w-5xl space-y-8">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-semibold text-text-primary">
+              {t("pageTitle")}
+            </h1>
+          </div>
+
+          <Link
+            href={`/${locale}/teacher/courses/new`}
+            className={buttonVariants({ variant: "default" })}
+          >
+            {t("createCourse")}
+          </Link>
+        </div>
+
+        {courses.length === 0 ? (
+          <EmptyState
+            message={t("emptyCourses")}
+            action={
+              <Link
+                href={`/${locale}/teacher/courses/new`}
+                className={buttonVariants({ variant: "outline" })}
+              >
+                {t("emptyCoursesAction")}
+              </Link>
+            }
+          />
+        ) : (
+          <TeacherCourseList courses={courses} locale={locale} />
+        )}
+      </div>
+    </main>
+  );
+}
+```
+
+### Why this matters
+
+The teacher dashboard is the first real teacher-owned data view in the app.  
+It reads directly from Neon through Prisma on the server, shows only the signed-in teacher’s own courses, and uses shared UI patterns instead of placeholder markup.
+
+---
+
+## Step 10 — Build the teacher course list and publish toggle
+
+### Files to create
+
+- `components/teacher/TeacherCourseList.tsx`
+- `components/teacher/TogglePublishButton.tsx`
+
+### Code
+
+`components/teacher/TeacherCourseList.tsx`
+```tsx
+import Link from "next/link";
+import { getTranslations } from "next-intl/server";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
+import { buttonVariants } from "@/components/ui/button";
+import { TogglePublishButton } from "./TogglePublishButton";
+
+type Course = {
+  id: string;
+  nameAr: string;
+  nameEn: string | null;
+  isPublished: boolean;
+  _count: {
+    lessons: number;
+    enrollments: number;
+  };
+  subject: {
+    nameAr: string;
+    nameEn: string | null;
+    academicYear: {
+      nameAr: string;
+      nameEn: string | null;
+    };
+  };
+};
+
+type Props = {
+  courses: Course[];
+  locale: string;
+};
+
+export async function TeacherCourseList({ courses, locale }: Props) {
+  const t = await getTranslations("TeacherDashboard");
+
+  return (
+    <div className="space-y-4">
+      {courses.map((course) => (
+        <Card key={course.id}>
+          <CardContent className="flex flex-wrap items-start justify-between gap-4 p-5">
+            <div className="min-w-0 space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-base font-semibold text-text-primary">
+                  {locale === "ar" ? course.nameAr : course.nameEn ?? course.nameAr}
+                </h2>
+
+                <Badge variant={course.isPublished ? "default" : "secondary"}>
+                  {course.isPublished
+                    ? t("publishedBadge")
+                    : t("draftBadge")}
+                </Badge>
+              </div>
+
+              <p className="text-sm text-text-secondary">
+                {locale === "ar"
+                  ? course.subject.academicYear.nameAr
+                  : course.subject.academicYear.nameEn ??
+                    course.subject.academicYear.nameAr}
+                {" · "}
+                {locale === "ar"
+                  ? course.subject.nameAr
+                  : course.subject.nameEn ?? course.subject.nameAr}
+              </p>
+
+              <p className="text-xs text-text-muted">
+                {t("lessonsCount", { count: course._count.lessons })}
+                {" · "}
+                {t("enrollmentsCount", { count: course._count.enrollments })}
+              </p>
+            </div>
+
+            <div className="flex flex-shrink-0 items-center gap-2">
+              <Link
+                href={`/${locale}/teacher/courses/${course.id}/edit`}
+                className={buttonVariants({ variant: "outline", size: "sm" })}
+              >
+                {t("editCourse")}
+              </Link>
+
+              <TogglePublishButton
+                courseId={course.id}
+                isPublished={course.isPublished}
+              />
+            </div>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}
+```
+
+`components/teacher/TogglePublishButton.tsx`
+```tsx
+"use client";
+
+import { useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
+import { togglePublishAction } from "@/actions/course";
+import { Button } from "@/components/ui/button";
+
+type Props = {
+  courseId: string;
+  isPublished: boolean;
+};
+
+export function TogglePublishButton({ courseId, isPublished }: Props) {
+  const t = useTranslations("TeacherDashboard");
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+
+  function handleToggle() {
+    startTransition(async () => {
+      await togglePublishAction(courseId);
+      router.refresh();
+    });
+  }
+
+  return (
+    <Button
+      variant={isPublished ? "outline" : "default"}
+      size="sm"
+      onClick={handleToggle}
+      disabled={isPending}
+    >
+      {isPublished ? t("unpublishCourse") : t("publishCourse")}
+    </Button>
+  );
+}
+```
+
+### Why this matters
+
+The course list is the teacher’s main dashboard view, so it needs to clearly show ownership, publish state, and readiness for future lesson/media work.  
+The publish toggle uses a thin client trigger but still routes the real mutation through the shared backend architecture.
+
+---
+
+## Step 11 — Build create and edit teacher course pages
+
+### Files to create
+
+- `app/[locale]/(teacher)/teacher/courses/new/page.tsx`
+- `app/[locale]/(teacher)/teacher/courses/[courseId]/edit/page.tsx`
+
+### Code
+
+`app/[locale]/(teacher)/teacher/courses/new/page.tsx`
+```tsx
+import { currentUser } from "@clerk/nextjs/server";
+import { redirect } from "next/navigation";
+import { getTranslations } from "next-intl/server";
+import { getSubjectsForCourseForm } from "@/lib/queries/teacher";
+import { CourseForm } from "@/components/teacher/CourseForm";
+import { SectionCard } from "@/components/shared/SectionCard";
+
+type Props = {
+  params: Promise<{ locale: string }>;
+};
+
+export default async function NewCoursePage({ params }: Props) {
+  const { locale } = await params;
+  const user = await currentUser();
+
+  if (!user) {
+    redirect(`/${locale}/sign-in`);
+  }
+
+  const t = await getTranslations("TeacherDashboard");
+  const subjects = await getSubjectsForCourseForm();
+
+  return (
+    <main className="min-h-screen bg-background p-6 md:p-10">
+      <div className="mx-auto max-w-2xl">
+        <SectionCard title={t("createCourse")}>
+          <CourseForm mode="create" subjects={subjects} locale={locale} />
+        </SectionCard>
+      </div>
+    </main>
+  );
+}
+```
+
+`app/[locale]/(teacher)/teacher/courses/[courseId]/edit/page.tsx`
+```tsx
+import { currentUser } from "@clerk/nextjs/server";
+import { notFound, redirect } from "next/navigation";
+import { getTranslations } from "next-intl/server";
+import {
+  getSubjectsForCourseForm,
+  getTeacherCourseById,
+} from "@/lib/queries/teacher";
+import { CourseForm } from "@/components/teacher/CourseForm";
+import { SectionCard } from "@/components/shared/SectionCard";
+
+type Props = {
+  params: Promise<{ locale: string; courseId: string }>;
+};
+
+export default async function EditCoursePage({ params }: Props) {
+  const { locale, courseId } = await params;
+  const user = await currentUser();
+
+  if (!user) {
+    redirect(`/${locale}/sign-in`);
+  }
+
+  const [course, subjects] = await Promise.all([
+    getTeacherCourseById(courseId, user.id),
+    getSubjectsForCourseForm(),
+  ]);
+
+  if (!course) {
+    notFound();
+  }
+
+  const t = await getTranslations("TeacherDashboard");
+
+  return (
+    <main className="min-h-screen bg-background p-6 md:p-10">
+      <div className="mx-auto max-w-2xl">
+        <SectionCard title={t("editCourse")}>
+          <CourseForm
+            mode="edit"
+            subjects={subjects}
+            locale={locale}
+            defaultValues={{
+              courseId: course.id,
+              subjectId: course.subjectId,
+              nameAr: course.nameAr,
+              nameEn: course.nameEn ?? undefined,
+              descriptionAr: course.descriptionAr ?? undefined,
+              descriptionEn: course.descriptionEn ?? undefined,
+              price: course.price,
+            }}
+          />
+        </SectionCard>
+      </div>
+    </main>
+  );
+}
+```
+
+### Why this matters
+
+Create and edit are the core real management flows of Feature 08.  
+They use shared UI, localized labels, server-side reads, and ownership-aware data access without duplicating the underlying logic.
+
+---
+
+## Step 12 — Update shared supporting components only if needed
+
+### Files that may need a small update
+
+- `components/shared/EmptyState.tsx`
+- `components/shared/SectionCard.tsx`
+
+### Code
+
+If `EmptyState` does not yet support actions:
+
+```tsx
+type Props = {
+  message: string;
+  action?: React.ReactNode;
+};
+
+export function EmptyState({ message, action }: Props) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-4 py-20 text-center">
+      <p className="text-sm text-text-muted">{message}</p>
+      {action ? <div>{action}</div> : null}
+    </div>
+  );
+}
+```
+
+If `SectionCard` does not yet support a title prop:
+
+```tsx
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+
+type Props = {
+  title?: string;
+  children: React.ReactNode;
+};
+
+export function SectionCard({ title, children }: Props) {
+  return (
+    <Card>
+      {title ? (
+        <CardHeader>
+          <CardTitle>{title}</CardTitle>
+        </CardHeader>
+      ) : null}
+
+      <CardContent>{children}</CardContent>
+    </Card>
+  );
+}
+```
+
+### Why this matters
+
+Feature 08 should extend the shared UI layer when needed, not bypass it with temporary page-only structures.  
+These small updates keep supporting components reusable across later teacher/admin flows.
+
+---
+
+## Step 13 — Local verification used for this feature
+
+### Commands
+
+```bash
+npm run dev
+npx prisma studio
+npx tsc --noEmit
+npm run build
+```
+
+### Also verify the teacher API route
+
+```bash
+curl "http://localhost:3000/api/teacher/courses?teacherId=YOUR_CLERK_USER_ID"
+```
+
+### What to verify
+
+- `/ar/teacher` loads the teacher dashboard in Arabic with RTL layout.
+- `/en/teacher` loads the same dashboard in English with LTR layout.
+- A signed-in teacher only sees their own courses.
+- The empty state appears correctly when the teacher has no courses.
+- `/ar/teacher/courses/new` loads a localized create form.
+- The subject select is populated from real Neon data.
+- Creating a course inserts a real `courses` row in Neon with the current Clerk user ID in `teacherId`.
+- New courses appear on the teacher dashboard as `Draft`.
+- Editing a course updates the real row in Neon.
+- Toggling publish state updates `isPublished` correctly.
+- `/api/teacher/courses?teacherId=...` returns JSON using the shared query layer.
+- No visible strings remain hardcoded in any teacher-facing component.
+- `npx tsc --noEmit` and `npm run build` both pass.
+
+---
+
+## Step 14 — Commit the teacher dashboard and course management flow
+
+### Command
+
+```bash
+git add .
+git commit -m "feat(08): teacher dashboard and course management flow"
+git push origin main
+```
+
+### Why this matters
+
+This saves the first real teacher-owned product flow, using the shared read/write architecture, the shared shadcn-based UI system, and real Prisma-backed mutations instead of mock data.
+
+---
+
+## Feature 08 completion checklist
+
+- [x] Teacher dashboard reads real teacher-owned courses from Neon through Prisma
+- [x] `Course.price` added as a minimal forward-compatible schema field
+- [x] Teacher reads centralized in `lib/queries/teacher.ts`
+- [x] Teacher write business logic centralized in `lib/mutations/course.ts`
+- [x] Web-only Server Actions added in `actions/course.ts` as thin wrappers
+- [x] Mobile-facing teacher API route added in `app/api/teacher/courses/route.ts`
+- [x] Real create course flow implemented
+- [x] Real edit course basics flow implemented
+- [x] Real publish / draft toggle implemented
+- [x] Ownership checks enforced inside the shared mutation layer
+- [x] Teacher UI built using the shared Feature 07 design system primitives
+- [x] New visible strings localized under `TeacherDashboard`
+- [x] Arabic-first / RTL-safe teacher flow preserved
+- [x] No mock-data dependency used for this feature
+- [x] No stale Supabase-specific implementation assumptions used in this feature
+
+---
+
+## Notes for future features
+
+- Feature 09 should extend this teacher course-management base by adding lesson/media authoring, not by rebuilding course ownership or teacher dashboard reads.
+- Full mobile/API auth enforcement for teacher routes should be tightened in a later feature once the mobile authentication contract is finalized.
+- If future teacher flows need richer UI primitives such as dialog, sheet, or advanced form components, those should be added through the shared `components/ui` layer first.
+- `teacherId` as Clerk user ID should continue to be treated as the ownership key unless the project deliberately introduces a different cross-platform teacher identity mapping later.
+- Feature 10 and later monetization/access flows can safely build on the `price` field added here without reopening the teacher course basics implementation.
