@@ -1,6 +1,9 @@
 import { getTranslations } from "next-intl/server";
 import Link from "next/link";
 import { getActiveAcademicYears } from "@/lib/queries/browse";
+import { SectionCard } from "@/components/shared/SectionCard";
+import { EmptyState } from "@/components/shared/EmptyState";
+import { ErrorState } from "@/components/shared/ErrorState";
 
 export default async function BrowsePage({
   params,
@@ -20,26 +23,27 @@ export default async function BrowsePage({
   }
 
   return (
-    <main className="px-6 py-10" dir="auto">
-      <h1 className="mb-6 text-2xl font-bold">{t("yearsHeading")}</h1>
+    <main className="px-6 py-10">
+      <h1 className="mb-6 text-2xl font-semibold text-text-primary">
+        {t("yearsHeading")}
+      </h1>
 
-      {loadError && <p className="text-red-600">{t("errorLoad")}</p>}
+      {loadError && <ErrorState message={t("errorLoad")} />}
 
       {!loadError && years.length === 0 && (
-        <p className="text-muted-foreground">{t("emptyYears")}</p>
+        <EmptyState message={t("emptyYears")} />
       )}
 
       {!loadError && years.length > 0 && (
         <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {years.map((year) => (
             <li key={year.id}>
-              <Link
-                href={`/${locale}/browse/${year.id}`}
-                className="block rounded-xl border p-5 hover:bg-accent transition-colors"
-              >
-                <p className="text-lg font-semibold">
-                  {locale === "ar" ? year.nameAr : year.nameEn ?? year.nameAr}
-                </p>
+              <Link href={`/${locale}/browse/${year.id}`}>
+                <SectionCard className="cursor-pointer hover:border-accent transition-colors p-5">
+                  <p className="text-lg font-semibold text-text-primary">
+                    {locale === "ar" ? year.nameAr : year.nameEn ?? year.nameAr}
+                  </p>
+                </SectionCard>
               </Link>
             </li>
           ))}

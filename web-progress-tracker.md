@@ -6,9 +6,9 @@ Update this file after each completed feature.
 
 ## Current Status
 Phase: Phase 2 — Core Product Flows
-Current Goal: Insert the shared web design-system foundation now, before deeper teacher/admin/media flows, so future work stays consistent, RTL-safe, and easier to evolve
-Last completed: 06 — Course Detail, Preview, and Access States
-Next up: 07 — Establish Web Design System and Shared UI Components
+Current Goal: Continue deeper product flows on top of the established shared web design-system foundation so future work stays consistent, RTL-safe, localized, and easier to evolve
+Last completed: 07 — Establish Web Design System and Shared UI Components
+Next up: 08 — Teacher Dashboard and Course Management Flow
 
 ## Required First Read
 Before starting any feature, the AI agent must read these 8 files from the repo first:
@@ -43,6 +43,9 @@ Do not start implementation before reading all 8 files.
 - Because of this, every feature that involves student- or teacher-facing data must be built with a shared data-access layer from the start, so both web and mobile can consume the same logic without duplicating it.
 - A shared design system should now be established earlier than originally planned so future teacher/admin/media/payment screens do not drift into inconsistent UI patterns that become harder to refactor later.
 - If a component foundation is adopted, it should be treated as a customizable system layer, not as a copy-paste UI dump.
+- The active UI foundation is now **shadcn/ui plus shared project wrapper components**, customized for Moallem Academy rather than used as an unmodified default kit.
+- All future web features must use the established shared design-system layer first, and should not introduce parallel ad-hoc UI patterns.
+- Any new visible UI string introduced in future features must continue to go through the localization system with Arabic-first defaults, English parity, and RTL-safe structure.
 
 ## Progress
 
@@ -55,7 +58,7 @@ Do not start implementation before reading all 8 files.
 ### Phase 2 — Core Product Flows
 - [x] 05 — Student Browse and Course Discovery Flow
 - [x] 06 — Course Detail, Preview, and Access States
-- [ ] 07 — Establish Web Design System and Shared UI Components
+- [x] 07 — Establish Web Design System and Shared UI Components
 - [ ] 08 — Teacher Dashboard and Course Management Flow
 - [ ] 09 — Course Media Source System (Cloudinary Upload + External Links)
 - [ ] 10 — Manual Payment and Access Confirmation Web Flows
@@ -71,7 +74,7 @@ Do not start implementation before reading all 8 files.
 - [ ] 16 — Deployment and Environment Readiness
 
 ## In Progress
-- 07 — Establish Web Design System and Shared UI Components (not yet started)
+- None
 
 ## Open Questions
 - Confirm exact admin/staff permissions for enrollment override, access confirmation, and content moderation.
@@ -84,7 +87,7 @@ Do not start implementation before reading all 8 files.
 - Confirm final folder naming convention (`lib/mutations/` vs `lib/actions-core/`, etc.) before Feature 08 introduces the first real mutation-heavy teacher flow.
 - Confirm ownership enforcement rules for `Course.teacherId` before Feature 08 allows teachers to create/edit courses.
 - Confirm whether `Lesson.videoUrl` stays a plain string placeholder or needs an early enum/type hint before Feature 09 introduces multi-source media.
-- Confirm whether the web design-system foundation should adopt shadcn/ui as the base component distribution layer, or use a lighter custom wrapper strategy while preserving RTL/localization constraints.
+- Confirm whether any additional shared form abstractions should be added on top of the current component layer before Feature 08 expands teacher-facing create/edit flows.
 
 ## Architecture Decisions
 - Web starts now because the mobile side is stable enough for aligned implementation.
@@ -117,7 +120,15 @@ Do not start implementation before reading all 8 files.
 - Feature 06 confirmed the project has fully moved to Prisma 7 with `prisma.config.ts` as the source of connection configuration; `schema.prisma` no longer contains a `url` field in the `datasource` block, consistent with Prisma 7's config-based model.
 - Feature 06 established that `lib/queries/course.ts` exposes both public course-detail reads and student-specific enrollment-status reads as separate functions, avoiding over-fetching for unauthenticated visitors while staying reusable from mobile API routes.
 - A design-system foundation is now intentionally being inserted before deeper teacher/admin/media work so component choices, form patterns, spacing, states, and RTL behavior are standardized earlier rather than deferred to late-stage cleanup.
-- If shadcn/ui or another component foundation is adopted, it must be customized to the project’s localization, RTL, accessibility, and product style needs rather than used as an unmodified default kit.
+- The project now uses **shadcn/ui** as the base component distribution layer, aligned with the official Next.js installation and theming guidance.
+- The shared component architecture is now:
+  - `components/ui/*` — generated shadcn/ui primitives and base building blocks.
+  - `components/shared/*` — project-owned reusable wrappers and product-level UI patterns such as shared cards, states, and status displays.
+  - feature-specific folders like `components/student/*` — domain components built on top of `components/ui/*` and `components/shared/*`, not ad-hoc raw markup unless there is a clear reason.
+- All future features must prefer extending the shared component system over adding one-off page-level styling patterns.
+- Link-style navigation that looks like a button should follow the current shadcn guidance by using `buttonVariants(...)` on links rather than relying on non-guaranteed `asChild` support in local button implementations.
+- Tailwind v4 theming and project tokens must remain aligned with the Moallem Academy palette from `web-ui-context.md`, while shadcn semantic variables continue to be mapped into that same product design direction.
+- Arabic-first layout, English parity, localization discipline, accessibility, and RTL-safe interaction behavior are all part of the design-system contract and must be preserved in every subsequent feature.
 
 ## Session Notes
 - Mobile side is now stable enough to begin web implementation.
@@ -146,3 +157,10 @@ Do not start implementation before reading all 8 files.
 - During Feature 06, the project was confirmed to already be running Prisma 7.9.1 with `prisma.config.ts` handling datasource connection config; `schema.prisma` was cleaned up to remove the legacy `url` field from the `datasource` block, resolving a stale VS Code Prisma extension validation warning unrelated to actual build/runtime behavior.
 - Feature 06 is now complete and verified locally: migration applied, Prisma client generated, course detail page renders correctly in Arabic and English with RTL layout, preview/locked lesson states confirmed visually, and the mobile-facing `app/api/courses/[courseId]` route returns valid JSON.
 - The plan was updated after Feature 06 to insert an earlier dedicated design-system/shared-components feature before teacher management, because waiting until late polish would make refactoring more expensive.
+- Feature 07 is now complete and established the shared web design-system foundation before teacher/admin/media expansion.
+- Feature 07 adopted **shadcn/ui** as the base component distribution layer for the web app, following the current official installation and theming guidance for Next.js and aligning it with the existing Moallem Academy Tailwind v4 token system.
+- Feature 07 established the long-term UI architecture split between `components/ui/*` for base shadcn primitives, `components/shared/*` for product-level reusable wrappers, and feature-specific domain components layered on top.
+- Feature 07 refactored the existing early student-facing surfaces, including auth shell, landing, browse, and course detail screens, to use the new shared component approach instead of continuing with isolated raw page-level patterns.
+- Feature 07 confirmed the project should use `buttonVariants(...)` on navigation links styled as buttons, matching current shadcn guidance and avoiding reliance on inconsistent local `asChild` support.
+- Feature 07 preserved Arabic-first behavior, English parity, RTL-safe layout patterns, and localization discipline while establishing the reusable UI base.
+- Starting with Feature 08, every new screen and refactor should build through the shared shadcn/ui + `components/shared/*` layer first, rather than introducing parallel component conventions.

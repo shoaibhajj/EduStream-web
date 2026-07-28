@@ -1,5 +1,6 @@
 import { useTranslations } from "next-intl";
 import { Lock, PlayCircle, Eye } from "lucide-react";
+import { StatusBadge } from "@/components/shared/StatusBadge";
 
 type LessonAccessState = "preview" | "accessible" | "locked";
 
@@ -22,23 +23,14 @@ export function LessonRow({
 
   const title = locale === "ar" ? titleAr : titleEn ?? titleAr;
 
-  const badgeConfig = {
-    preview: {
-      label: t("previewBadge"),
-      className: "bg-success-light text-success",
-      icon: <Eye size={14} />,
-    },
-    accessible: {
-      label: t("accessibleBadge"),
-      className: "bg-accent-light text-accent",
-      icon: <PlayCircle size={14} />,
-    },
-    locked: {
-      label: t("lockedBadge"),
-      className: "bg-surface-secondary text-locked",
-      icon: <Lock size={14} />,
-    },
-  } as const;
+  const badgeConfig: Record<
+    LessonAccessState,
+    { label: string; icon: React.ReactNode }
+  > = {
+    preview: { label: t("previewBadge"), icon: <Eye size={14} /> },
+    accessible: { label: t("accessibleBadge"), icon: <PlayCircle size={14} /> },
+    locked: { label: t("lockedBadge"), icon: <Lock size={14} /> },
+  };
 
   const badge = badgeConfig[accessState];
 
@@ -56,12 +48,11 @@ export function LessonRow({
           {title}
         </span>
       </div>
-      <span
-        className={`flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${badge.className}`}
-      >
-        {badge.icon}
-        {badge.label}
-      </span>
+      <StatusBadge
+        variant={accessState}
+        label={badge.label}
+        icon={badge.icon}
+      />
     </li>
   );
 }

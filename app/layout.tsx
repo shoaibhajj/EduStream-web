@@ -1,5 +1,11 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { Geist, Roboto_Slab } from "next/font/google";
+import { cn } from "@/lib/utils";
+
+const robotoSlab = Roboto_Slab({subsets:['latin'],variable:'--font-serif'});
+
+const geist = Geist({subsets:['latin'],variable:'--font-sans'});
 
 export const metadata: Metadata = {
   title: "Moallem Academy | أكاديمية المعلم",
@@ -12,7 +18,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html suppressHydrationWarning>
+    <html suppressHydrationWarning className={cn( geist.variable, "font-serif", robotoSlab.variable)}>
       <body>{children}</body>
     </html>
   );

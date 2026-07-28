@@ -7,6 +7,11 @@
     "signUp": "إنشاء حساب",
     "startNow": "ابدأ الآن"
   },
+  "StudentDashboard": {
+  "brand": "أكاديمية المعلم",
+  "greeting": "مرحباً، {name}",
+  "defaultName": "طالب"
+},
   "auth": {
     "signIn": {
       "title": "مرحباً بعودتك",

@@ -6,7 +6,11 @@
     "signIn": "Sign in",
     "signUp": "Sign up",
     "startNow": "Get started"
-  },
+  },"StudentDashboard": {
+  "brand": "Moallem Academy",
+  "greeting": "Welcome, {name}",
+  "defaultName": "Student"
+},
   "auth": {
     "signIn": {
       "title": "Welcome back",

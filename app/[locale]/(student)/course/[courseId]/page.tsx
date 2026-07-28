@@ -8,6 +8,14 @@ import {
 } from "@/lib/queries/course";
 import { prisma } from "@/lib/prisma";
 import { LessonRow } from "@/components/student/LessonRow";
+import { SectionCard } from "@/components/shared/SectionCard";
+import { EmptyState } from "@/components/shared/EmptyState";
+import { ErrorState } from "@/components/shared/ErrorState";
+import { StatusBadge } from "@/components/shared/StatusBadge";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
+import { ChevronRight } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 export default async function CourseDetailPage({
   params,
@@ -29,9 +37,8 @@ export default async function CourseDetailPage({
 
   if (!loadError && !course) notFound();
 
-  // Resolve student enrollment state
   const { userId: clerkUserId } = await auth();
- let enrollmentStatus = "none";
+  let enrollmentStatus = "none";
   if (clerkUserId && course) {
     try {
       const profile = await prisma.profile.findUnique({
@@ -49,11 +56,10 @@ export default async function CourseDetailPage({
       }
     } catch (error) {
       console.error("[CourseDetailPage] enrollment check error:", error);
-      // Non-fatal — fall through to "none" state
     }
   }
 
- const hasFullAccess = enrollmentStatus === "confirmed"; 
+  const hasFullAccess = enrollmentStatus === "confirmed";
 
   const courseName =
     locale === "ar" ? course?.nameAr : course?.nameEn ?? course?.nameAr;
@@ -63,26 +69,27 @@ export default async function CourseDetailPage({
       : course?.descriptionEn ?? course?.descriptionAr;
 
   return (
-    <main className="px-6 py-10 max-w-3xl mx-auto" dir="auto">
+    <main className="px-6 py-10 max-w-3xl mx-auto">
       {loadError ? (
-        <p className="text-error">{t("errorLoad")}</p>
+        <ErrorState message={t("errorLoad")} />
       ) : (
         <>
           {/* Back link */}
           <Link
             href={`/${locale}/browse`}
-            className="mb-6 inline-block text-sm text-text-muted hover:underline"
+            className="mb-6 inline-flex items-center gap-1 text-sm text-text-muted hover:text-text-secondary transition-colors"
           >
-            ← {t("backToCourses")}
+            <ChevronRight size={14} className="rotate-180 rtl:rotate-0" />
+            {t("backToCourses")}
           </Link>
 
           {/* Course header */}
-          <div className="mb-8">
+          <SectionCard className="mb-6">
             {course!.thumbnailUrl && (
               <img
                 src={course!.thumbnailUrl}
                 alt=""
-                className="mb-5 w-full rounded-xl object-cover aspect-video"
+                className="mb-5 w-full rounded-lg object-cover aspect-video"
               />
             )}
             <h1 className="text-2xl font-bold text-text-primary mb-2">
@@ -91,53 +98,47 @@ export default async function CourseDetailPage({
             {courseDescription && (
               <p className="text-sm text-text-secondary">{courseDescription}</p>
             )}
-          </div>
+          </SectionCard>
 
           {/* Enrollment / access status banner */}
           {!clerkUserId && (
-            <div className="mb-6 rounded-xl border border-border bg-surface-secondary px-5 py-4">
-              <p className="text-sm text-text-secondary mb-3">
-                {t("enrollCta")}
-              </p>
+            <SectionCard className="mb-6 flex flex-col gap-3">
+              <p className="text-sm text-text-secondary">{t("enrollCta")}</p>
               <Link
                 href={`/${locale}/sign-in`}
-                className="inline-block rounded-md bg-accent px-4 py-2 text-sm font-medium text-white"
+                className={cn(buttonVariants({ size: "sm" }), "w-fit")}
               >
                 {t("enrollCta")}
               </Link>
-            </div>
+            </SectionCard>
           )}
 
           {clerkUserId && enrollmentStatus === "none" && (
-            <div className="mb-6 rounded-xl border border-border bg-surface-secondary px-5 py-4">
+            <SectionCard className="mb-6 flex items-center justify-between gap-4">
               <p className="text-sm text-text-secondary">{t("enrollCta")}</p>
-              {/* Enroll button — wired in Feature 09 */}
-            </div>
+              {/* Enroll button — wired in Feature 10 */}
+            </SectionCard>
           )}
 
           {clerkUserId && enrollmentStatus === "pending" && (
-            <div className="mb-6 rounded-xl border border-warning bg-surface-secondary px-5 py-4">
-              <p className="text-sm text-warning font-medium">
-                {t("pendingNote")}
-              </p>
-            </div>
+            <SectionCard className="mb-6 flex items-center gap-3">
+              <StatusBadge variant="pending" label={t("pendingNote")} />
+            </SectionCard>
           )}
 
           {clerkUserId && enrollmentStatus === "rejected" && (
-            <div className="mb-6 rounded-xl border border-error bg-surface-secondary px-5 py-4">
-              <p className="text-sm text-error font-medium">
-                {t("rejectedNote")}
-              </p>
-            </div>
+            <SectionCard className="mb-6 flex items-center gap-3">
+              <StatusBadge variant="rejected" label={t("rejectedNote")} />
+            </SectionCard>
           )}
 
           {clerkUserId && enrollmentStatus === "confirmed" && (
-            <div className="mb-6 rounded-xl border border-success bg-success-light px-5 py-4">
-              <p className="text-sm text-success font-medium">
-                {t("confirmedNote")}
-              </p>
-            </div>
+            <SectionCard className="mb-6 flex items-center gap-3">
+              <StatusBadge variant="confirmed" label={t("confirmedNote")} />
+            </SectionCard>
           )}
+
+          <Separator className="mb-6 bg-border" />
 
           {/* Lesson list */}
           <section>
@@ -146,7 +147,7 @@ export default async function CourseDetailPage({
             </h2>
 
             {course!.lessons.length === 0 ? (
-              <p className="text-sm text-text-muted">{t("lessonsEmpty")}</p>
+              <EmptyState message={t("lessonsEmpty")} />
             ) : (
               <ul className="flex flex-col gap-2">
                 {course!.lessons.map((lesson, index) => {

@@ -1,6 +1,36 @@
 @import "tailwindcss";
 
+/* ─── shadcn/ui CSS variable bridge for Tailwind v4 ─────────────────────── */
+/* shadcn components use var(--primary), var(--background), etc.             */
+/* We define them here under :root so shadcn components resolve correctly.   */
+/* We also keep our project design tokens in @theme so Tailwind utilities    */
+/* like bg-accent, text-text-primary, etc. continue to work as-is.          */
+
+:root {
+  /* shadcn semantic tokens — mapped to Moallem Academy palette */
+  --background: 248 249 251;       /* #F6F7FB — matches --color-background */
+  --foreground: 16 24 40;          /* #101828 — matches --color-text-primary */
+  --card: 255 255 255;             /* #FFFFFF */
+  --card-foreground: 16 24 40;
+  --popover: 255 255 255;
+  --popover-foreground: 16 24 40;
+  --primary: 124 92 252;           /* #7C5CFC — matches --color-accent */
+  --primary-foreground: 255 255 255;
+  --secondary: 249 250 251;        /* #F9FAFB — matches --color-surface-secondary */
+  --secondary-foreground: 16 24 40;
+  --muted: 249 250 251;
+  --muted-foreground: 153 161 175; /* #99A1AF — matches --color-text-muted */
+  --accent: 243 232 255;           /* #F3E8FF — matches --color-accent-light */
+  --accent-foreground: 124 92 252;
+  --destructive: 239 68 68;        /* #EF4444 — matches --color-error */
+  --border: 231 234 243;           /* #E7EAF3 — matches --color-border */
+  --input: 231 234 243;
+  --ring: 124 92 252;
+  --radius: 0.5rem;
+}
+
 @theme {
+  /* ── Project design tokens (Tailwind v4 utilities) ─────────────────────── */
   --font-sans: "Inter", sans-serif;
   --color-background: #F6F7FB;
   --color-surface: #FFFFFF;
@@ -18,6 +48,7 @@
   --color-locked: #99A1AF;
 }
 
+/* ─── Clerk theme overrides ─────────────────────────────────────────────── */
 @layer clerk {
   .cl-card {
     background: #ffffff !important;

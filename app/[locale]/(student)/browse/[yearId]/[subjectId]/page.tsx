@@ -6,6 +6,12 @@ import {
   getActiveAcademicYears,
 } from "@/lib/queries/browse";
 import { notFound } from "next/navigation";
+import { SectionCard } from "@/components/shared/SectionCard";
+import { EmptyState } from "@/components/shared/EmptyState";
+import { ErrorState } from "@/components/shared/ErrorState";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { ChevronRight } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 export default async function SubjectCoursesPage({
   params,
@@ -15,7 +21,6 @@ export default async function SubjectCoursesPage({
   const { locale, yearId, subjectId } = await params;
   const t = await getTranslations("Browse");
 
-  // Validate both yearId and subjectId
   const years = await getActiveAcademicYears();
   const year = years.find((y) => y.id === yearId);
   if (!year) notFound();
@@ -38,55 +43,63 @@ export default async function SubjectCoursesPage({
     locale === "ar" ? subject.nameAr : subject.nameEn ?? subject.nameAr;
 
   return (
-    <main className="px-6 py-10" dir="auto">
+    <main className="px-6 py-10">
       <Link
         href={`/${locale}/browse/${yearId}`}
-        className="mb-6 inline-block text-sm text-muted-foreground hover:underline"
+        className="mb-6 inline-flex items-center gap-1 text-sm text-text-muted hover:text-text-secondary transition-colors"
       >
-        ← {t("backToSubjects")}
+        <ChevronRight size={14} className="rotate-180 rtl:rotate-0" />
+        {t("backToSubjects")}
       </Link>
 
-      <h1 className="mb-6 text-2xl font-bold">
+      <h1 className="mb-6 text-2xl font-semibold text-text-primary">
         {subjectName} — {t("coursesHeading")}
       </h1>
 
-      {loadError && <p className="text-red-600">{t("errorLoad")}</p>}
+      {loadError && <ErrorState message={t("errorLoad")} />}
 
       {!loadError && courses.length === 0 && (
-        <p className="text-muted-foreground">{t("emptyCourses")}</p>
+        <EmptyState message={t("emptyCourses")} />
       )}
 
       {!loadError && courses.length > 0 && (
         <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {courses.map((course) => (
-            <li key={course.id} className="rounded-xl border p-5">
-              {course.thumbnailUrl && (
-                <img
-                  src={course.thumbnailUrl}
-                  alt=""
-                  className="mb-3 w-full rounded-lg object-cover aspect-video"
-                />
-              )}
-              <p className="text-lg font-semibold">
-                {locale === "ar"
-                  ? course.nameAr
-                  : course.nameEn ?? course.nameAr}
-              </p>
-              {(locale === "ar"
-                ? course.descriptionAr
-                : course.descriptionEn ?? course.descriptionAr) && (
-                <p className="mt-1 text-sm text-muted-foreground line-clamp-2">
-                  {locale === "ar"
+            <li key={course.id}>
+              <SectionCard className="flex flex-col gap-3 p-5 h-full">
+                {course.thumbnailUrl && (
+                  <img
+                    src={course.thumbnailUrl}
+                    alt=""
+                    className="w-full rounded-lg object-cover aspect-video"
+                  />
+                )}
+                <div className="flex-1 flex flex-col gap-2">
+                  <p className="text-base font-semibold text-text-primary">
+                    {locale === "ar"
+                      ? course.nameAr
+                      : course.nameEn ?? course.nameAr}
+                  </p>
+                  {(locale === "ar"
                     ? course.descriptionAr
-                    : course.descriptionEn ?? course.descriptionAr}
-                </p>
-              )}
-              <Link
-                href={`/${locale}/course/${course.id}`}
-                className="mt-3 inline-block text-sm font-medium text-primary hover:underline"
-              >
-                {t("viewCourse")} →
-              </Link>
+                    : course.descriptionEn ?? course.descriptionAr) && (
+                    <p className="text-sm text-text-secondary line-clamp-2">
+                      {locale === "ar"
+                        ? course.descriptionAr
+                        : course.descriptionEn ?? course.descriptionAr}
+                    </p>
+                  )}
+                </div>
+                <Link
+                  href={`/${locale}/course/${course.id}`}
+                  className={cn(
+                    buttonVariants({ variant: "outline", size: "sm" }),
+                    "mt-auto w-fit"
+                  )}
+                >
+                  {t("viewCourse")}
+                </Link>
+              </SectionCard>
             </li>
           ))}
         </ul>

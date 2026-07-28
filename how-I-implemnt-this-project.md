@@ -3235,3 +3235,508 @@ This saves the real course detail flow, the shared `lib/queries/course.ts` read 
 - Feature 09 (manual payment/access confirmation) should introduce the real `Enrollment`-creating mutation and the actual enroll button action — the UI placeholder ("enrollCta") added in Feature 06 is display-only and has no wired mutation yet.
 - The enrollment-status check pattern used here (Clerk `userId` → `Profile.clerkUserId` → `Enrollment.profileId`) should be reused as-is in Feature 09 rather than reinvented.
 - Keep an eye on the VS Code Prisma extension's Prisma-version detection setting after any future Prisma upgrade — it does not always auto-detect major version changes.
+
+
+---
+
+## Feature 07 — Establish Web Design System and Shared UI Components
+
+### Goal
+
+Establish the shared web UI foundation for **Moallem Academy** using:
+
+- shadcn/ui as the shared component base
+- reusable design-system-level UI components instead of page-specific styling
+- consistent button, input, card, label, textarea, and badge patterns
+- utility-based styling aligned with the existing Tailwind token setup
+- a reusable `cn()` helper and variant-based component styling
+- a corrected navigation-button pattern using `buttonVariants(...)` instead of `Button asChild`
+
+This feature is about creating the **shared web design system foundation** that later product features can build on cleanly.
+
+---
+
+## Decisions used for this feature
+
+- Tailwind remains the styling system and source of app-level visual tokens.
+- shadcn/ui was adopted as the shared component layer instead of building every primitive manually.
+- Shared UI files live under `components/ui`.
+- Reusable class merging is centralized through `lib/utils.ts`.
+- Button styling is variant-based through `class-variance-authority`.
+- The generated `Button` component in this project shape does **not** support `asChild`, so links that should look like buttons must use `buttonVariants(...)` with `cn(...)` instead.
+- Feature 07 focuses on the base component system, not on full teacher/student business flows.
+- The design system is web-first, but it also creates a cleaner visual contract for later mobile/web parity at the product level.
+
+---
+
+## Step 1 — Initialize shadcn/ui in the project
+
+### Command
+
+```bash
+npx shadcn@latest init
+```
+
+### Why this matters
+
+This sets up the shared component foundation and connects shadcn/ui to the current Next.js + Tailwind project structure instead of continuing with only ad-hoc custom classes.
+
+### What was configured
+
+- components path points to `components`
+- utils path points to `lib/utils`
+- Tailwind integration stays aligned with the existing app structure
+
+---
+
+## Step 2 — Add the first shared UI primitives
+
+### Command
+
+```bash
+npx shadcn@latest add button input textarea label card
+```
+
+Later, when needed for form-state work:
+
+```bash
+npx shadcn@latest add checkbox
+```
+
+### Files created or updated
+
+- `components/ui/button.tsx`
+- `components/ui/input.tsx`
+- `components/ui/textarea.tsx`
+- `components/ui/label.tsx`
+- `components/ui/card.tsx`
+- `components/ui/checkbox.tsx`
+- `lib/utils.ts`
+
+### Why this matters
+
+These primitives become the shared language of the UI layer, so later pages do not need to keep rebuilding the same button, field, and container patterns from scratch.
+
+---
+
+## Step 3 — Add the shared `cn()` utility
+
+### File created
+
+`lib/utils.ts`
+
+### Code
+
+```ts
+import { clsx, type ClassValue } from "clsx";
+import { twMerge } from "tailwind-merge";
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
+```
+
+### Why this matters
+
+Once shared UI components exist, class composition needs one consistent helper so variant classes and per-page overrides can be merged safely without duplicated utility conflicts.
+
+---
+
+## Step 4 — Add the shared button component
+
+### File created
+
+`components/ui/button.tsx`
+
+### Code
+
+```tsx
+import * as React from "react";
+import { cva, type VariantProps } from "class-variance-authority";
+import { cn } from "@/lib/utils";
+
+const buttonVariants = cva(
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-50",
+  {
+    variants: {
+      variant: {
+        default: "bg-accent text-white hover:opacity-90",
+        outline: "border border-border bg-surface text-text-primary hover:bg-surface-secondary",
+        secondary: "bg-surface-secondary text-text-primary hover:bg-surface",
+        ghost: "text-text-primary hover:bg-surface-secondary",
+        destructive: "bg-error text-white hover:opacity-90",
+        link: "text-accent underline-offset-4 hover:underline",
+      },
+      size: {
+        default: "h-10 px-4 py-2",
+        sm: "h-9 px-3",
+        lg: "h-11 px-8",
+        icon: "h-10 w-10",
+      },
+    },
+    defaultVariants: {
+      variant: "default",
+      size: "default",
+    },
+  }
+);
+
+export interface ButtonProps
+  extends React.ButtonHTMLAttributes<HTMLButtonElement>,
+    VariantProps<typeof buttonVariants> {}
+
+function Button({ className, variant, size, ...props }: ButtonProps) {
+  return (
+    <button
+      className={cn(buttonVariants({ variant, size }), className)}
+      {...props}
+    />
+  );
+}
+
+export { Button, buttonVariants };
+```
+
+### Why this matters
+
+This gives the project one reusable button contract for sizing and variants, and it becomes the styling source for both real `<button>` elements and navigation links that need button appearance.
+
+---
+
+## Step 5 — Add the shared form and surface primitives
+
+### Files created
+
+- `components/ui/input.tsx`
+- `components/ui/textarea.tsx`
+- `components/ui/label.tsx`
+- `components/ui/card.tsx`
+
+### Code
+
+`components/ui/input.tsx`
+```tsx
+import * as React from "react";
+import { cn } from "@/lib/utils";
+
+function Input({ className, type, ...props }: React.ComponentProps<"input">) {
+  return (
+    <input
+      type={type}
+      className={cn(
+        "flex h-10 w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50",
+        className
+      )}
+      {...props}
+    />
+  );
+}
+
+export { Input };
+```
+
+`components/ui/textarea.tsx`
+```tsx
+import * as React from "react";
+import { cn } from "@/lib/utils";
+
+function Textarea({ className, ...props }: React.ComponentProps<"textarea">) {
+  return (
+    <textarea
+      className={cn(
+        "flex min-h-[96px] w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50",
+        className
+      )}
+      {...props}
+    />
+  );
+}
+
+export { Textarea };
+```
+
+`components/ui/label.tsx`
+```tsx
+import * as React from "react";
+import { cn } from "@/lib/utils";
+
+function Label({ className, ...props }: React.ComponentProps<"label">) {
+  return (
+    <label
+      className={cn("text-sm font-medium text-text-primary", className)}
+      {...props}
+    />
+  );
+}
+
+export { Label };
+```
+
+`components/ui/card.tsx`
+```tsx
+import * as React from "react";
+import { cn } from "@/lib/utils";
+
+function Card({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      className={cn("rounded-xl border border-border bg-surface", className)}
+      {...props}
+    />
+  );
+}
+
+function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
+  return <div className={cn("flex flex-col space-y-1.5 p-6", className)} {...props} />;
+}
+
+function CardTitle({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      className={cn("text-base font-semibold text-text-primary", className)}
+      {...props}
+    />
+  );
+}
+
+function CardContent({ className, ...props }: React.ComponentProps<"div">) {
+  return <div className={cn("p-6 pt-0", className)} {...props} />;
+}
+
+export { Card, CardHeader, CardTitle, CardContent };
+```
+
+### Why this matters
+
+These components turn repeated field and container styling into shared primitives, which reduces duplication and keeps later pages visually consistent.
+
+---
+
+## Step 6 — Add checkbox when form-state UI started needing it
+
+### File created
+
+`components/ui/checkbox.tsx`
+
+### Code
+
+```tsx
+"use client";
+
+import * as React from "react";
+import { Check } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+export interface CheckboxProps
+  extends React.InputHTMLAttributes<HTMLInputElement> {}
+
+function Checkbox({ className, ...props }: CheckboxProps) {
+  return (
+    <label className="inline-flex items-center">
+      <input type="checkbox" className="peer sr-only" {...props} />
+      <span
+        className={cn(
+          "flex h-4 w-4 items-center justify-center rounded border border-border bg-surface text-white peer-checked:border-accent peer-checked:bg-accent",
+          className
+        )}
+      >
+        <Check className="h-3 w-3 opacity-0 peer-checked:opacity-100" />
+      </span>
+    </label>
+  );
+}
+
+export { Checkbox };
+```
+
+### Why this matters
+
+The design system needed a reusable boolean-input primitive so later forms could stay visually consistent instead of mixing browser-default checkboxes with custom field styling.
+
+---
+
+## Step 7 — Start using the shared UI primitives in real pages
+
+### Pattern used
+
+Instead of raw repeated markup such as:
+
+```tsx
+<input className="flex h-10 w-full rounded-md border border-border bg-surface px-3 py-2 text-sm" />
+```
+
+the app moved toward:
+
+```tsx
+<Input />
+```
+
+Instead of raw section wrappers like:
+
+```tsx
+<div className="rounded-xl border border-border bg-surface p-6">
+  ...
+</div>
+```
+
+the app moved toward:
+
+```tsx
+<Card>
+  <CardHeader>
+    <CardTitle>...</CardTitle>
+  </CardHeader>
+  <CardContent>...</CardContent>
+</Card>
+```
+
+### Why this matters
+
+Feature 07 is only useful if the shared components are actually used as the new default UI path instead of staying as unused generated files.
+
+---
+
+## Step 8 — Correct the `asChild` assumption on `Button`
+
+### Error encountered
+
+When trying to use:
+
+```tsx
+<Button asChild size="sm" className="w-fit">
+  <Link href={`/${locale}/sign-in`}>{t("enrollCta")}</Link>
+</Button>
+```
+
+TypeScript raised:
+
+```ts
+Property 'asChild' does not exist on type 'IntrinsicAttributes & ButtonProps ...'
+```
+
+### Why this happened
+
+The generated `Button` component in this project shape does not include an `asChild` prop, so the common Radix Slot-based pattern was not available in the actual local implementation.
+
+### Correct pattern used instead
+
+```tsx
+import Link from "next/link";
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+
+<Link
+  href={`/${locale}/sign-in`}
+  className={cn(buttonVariants({ size: "sm" }), "w-fit")}
+>
+  {t("enrollCta")}
+</Link>
+```
+
+### Why this matters
+
+This became an important implementation rule for the shared design system: use `<Button>` for actual button behavior, and use `Link` plus `buttonVariants(...)` for navigation elements that should look like buttons.
+
+---
+
+## Step 9 — Apply the corrected button-link pattern across affected pages
+
+### Pattern to use everywhere
+
+Replace:
+
+```tsx
+<Button asChild size="sm" className="w-fit">
+  <Link href="/somewhere">Action</Link>
+</Button>
+```
+
+with:
+
+```tsx
+<Link
+  href="/somewhere"
+  className={cn(buttonVariants({ size: "sm" }), "w-fit")}
+>
+  Action
+</Link>
+```
+
+For outline buttons:
+
+```tsx
+<Link
+  href={`/somewhere`}
+  className={cn(buttonVariants({ variant: "outline", size: "sm" }), "w-fit")}
+>
+  Action
+</Link>
+```
+
+### Files affected by this correction
+
+The implementation direction in this session specifically required updating places where link navigation had been styled through `<Button asChild>`, especially course-detail and browse-related page patterns.
+
+### Why this matters
+
+This prevents the same TypeScript error from reappearing and keeps the design system documentation truthful to the actual codebase instead of to a different shadcn template variant.
+
+---
+
+## Step 10 — Verification used for this feature
+
+### Commands
+
+```bash
+npx tsc --noEmit
+npm run build
+npm run dev
+```
+
+### What to verify
+
+- shared UI components compile correctly from `components/ui/*`
+- `lib/utils.ts` resolves correctly through the `@/lib/utils` alias
+- pages using `Button`, `Input`, `Textarea`, `Label`, and `Card` render correctly
+- links styled as buttons use `buttonVariants(...)` instead of `asChild`
+- no `Property 'asChild' does not exist on type ...` TypeScript error remains
+- shared styling stays aligned with existing app color tokens such as `accent`, `border`, `surface`, and `text-*`
+
+---
+
+## Step 11 — Commit the shared UI foundation
+
+### Command
+
+```bash
+git add .
+git commit -m "feat(07): establish web design system and shared ui components"
+git push origin main
+```
+
+### Why this matters
+
+This saves the shared UI foundation before later features build more business-specific surfaces on top of it.
+
+---
+
+## Feature 07 completion checklist
+
+- [x] shadcn/ui initialized in the project
+- [x] Shared UI primitives added under `components/ui`
+- [x] `lib/utils.ts` added with reusable `cn()` helper
+- [x] Shared button variants established with `class-variance-authority`
+- [x] Input, textarea, label, card, and checkbox primitives added
+- [x] Real pages started moving from repeated raw classes to shared primitives
+- [x] The incorrect `Button asChild` assumption was identified
+- [x] The correct `Link + buttonVariants(...) + cn(...)` pattern was adopted
+- [x] The shared design system now reflects the actual local implementation, not a generic template assumption
+
+---
+
+## Notes for future features
+
+- All future navigation links that need button styling should use `buttonVariants(...)` instead of `Button asChild` unless the local `Button` component is intentionally rewritten to support Slot-based composition.
+- Later features should keep building on `components/ui/*` before introducing page-local one-off primitives.
+- If a future feature needs richer form handling, `form`, `select`, `dialog`, and `popover` can be added through shadcn/ui in the same shared pattern.
+- Feature 08 and onward should treat Feature 07 as the visual foundation layer, not rebuild base controls from scratch.
