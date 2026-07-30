@@ -66,3 +66,30 @@ export async function getSubjectsForTeacherCourseForm() {
     ],
   });
 }
+
+// export async function getLessonsWithMediaForCourse(courseId: string) {
+//   return prisma.lesson.findMany({
+//     where: { courseId },
+//     include: { media: true },
+//     orderBy: { sortOrder: "asc" },
+//   });
+// }
+
+
+export async function getLessonsWithMediaForCourse(
+  courseId: string,
+  clerkUserId: string
+) {
+  // Ownership check: only fetch if this teacher owns the course
+  const course = await prisma.course.findFirst({
+    where: { id: courseId, teacherId: clerkUserId },
+    select: { id: true },
+  });
+  if (!course) return null;
+
+  return prisma.lesson.findMany({
+    where: { courseId },
+    include: { media: true },
+    orderBy: { sortOrder: "asc" },
+  });
+}

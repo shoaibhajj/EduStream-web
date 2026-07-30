@@ -1,51 +1,8 @@
-# Moallem Academy Web — Progress Tracker
-
-Repo: [https://github.com/shoaibhajj/EduStream-web.git](https://github.com/shoaibhajj/EduStream-web.git)
-
-Update this file after each completed feature.
-
 ## Current Status
 Phase: Phase 2 — Core Product Flows
 Current Goal: Continue deeper product flows on top of the established shared web design-system foundation so future work stays consistent, RTL-safe, localized, and easier to evolve
-Last completed: 08 — Teacher Dashboard and Course Management Flow
-Next up: 09 — Course Media Source System (Cloudinary Upload + External Links)
-
-## Required First Read
-Before starting any feature, the AI agent must read these 8 files from the repo first:
-
-1. `web-project-overview.md`
-2. `web-architecture.md`
-3. `web-code-standards.md`
-4. `web-ui-context.md`
-5. `web-build-plan.md`
-6. `web-progress-tracker.md`
-7. `web-ai-workflow-rules.md`
-8. `mobile-app-change-handoff.md`
-
-Do not start implementation before reading all 8 files.
-
-## Product Notes
-- Production-facing product name is now **Moallem Academy**.
-- Web is a real implementation phase, not a mock-data-first phase.
-- Web should use real Clerk authentication, real Neon database flows via Prisma, and real product data.
-- Web architecture must stay compatible with current and future mobile app needs where entities, permissions, and workflows are shared.
-- Arabic is the primary/default product language.
-- English is secondary.
-- RTL must be treated as a first-class requirement from the start.
-- Teacher course media may come from multiple sources:
-  - direct upload from the website
-  - future direct upload from the mobile app
-  - external video link entry
-- Media architecture must support this from the beginning instead of assuming a single video URL pattern.
-- Important backend change: the project database foundation moved away from Supabase and now uses **Neon + Prisma** for database connectivity on the web side.
-- Any old markdown/documentation references that still describe Supabase as the active web database foundation should be updated to reflect **Neon + Prisma** if that direction remains official.
-- The product is cross-platform by design: web (Next.js) and mobile (React Native/Expo) share the same backend, database, and business logic, but never share source code directly between repos.
-- Because of this, every feature that involves student- or teacher-facing data must be built with a shared data-access layer from the start, so both web and mobile can consume the same logic without duplicating it.
-- A shared design system should now be established earlier than originally planned so future teacher/admin/media/payment screens do not drift into inconsistent UI patterns that become harder to refactor later.
-- If a component foundation is adopted, it should be treated as a customizable system layer, not as a copy-paste UI dump.
-- The active UI foundation is now **shadcn/ui plus shared project wrapper components**, customized for Moallem Academy rather than used as an unmodified default kit.
-- All future web features must use the established shared design-system layer first, and should not introduce parallel ad-hoc UI patterns.
-- Any new visible UI string introduced in future features must continue to go through the localization system with Arabic-first defaults, English parity, and RTL-safe structure.
+Last completed: 09 — Course Media Source System (Cloudinary Upload + External Links)
+Next up: 10 — Manual Payment and Access Confirmation Web Flows
 
 ## Progress
 
@@ -60,7 +17,7 @@ Do not start implementation before reading all 8 files.
 - [x] 06 — Course Detail, Preview, and Access States
 - [x] 07 — Establish Web Design System and Shared UI Components
 - [x] 08 — Teacher Dashboard and Course Management Flow
-- [ ] 09 — Course Media Source System (Cloudinary Upload + External Links)
+- [x] 09 — Course Media Source System (Cloudinary Upload + External Links)
 - [ ] 10 — Manual Payment and Access Confirmation Web Flows
 
 ### Phase 3 — Shared Product Operations
@@ -80,12 +37,14 @@ Do not start implementation before reading all 8 files.
 - Confirm exact admin/staff permissions for enrollment override, access confirmation, and content moderation.
 - Confirm which entities and permissions must be fully shared between web and mobile from the start.
 - Confirm the final media-handling rules for uploaded videos vs externally linked videos.
-- Confirm whether Cloudinary is the only upload provider for owned video/media assets.
-- Confirm how preview/free-lesson media should be modeled across uploaded and linked content.
+- Confirm whether Cloudinary is the only upload provider for owned video/media assets, or whether Backblaze B2 should be added as the next owned-storage provider.
+- Confirm how preview/free-lesson media should be modeled across uploaded and linked content now that lesson media is provider-aware.
 - Confirm whether Neon + Prisma is the permanent shared backend direction for web only, or whether future mobile/backend alignment will also move away from Supabase.
-- Confirm whether mobile API routes need authentication (Clerk token verification) starting with Feature 09, or whether this remains deferred until Feature 10 (payment/access confirmation).
-- Confirm whether `Lesson.videoUrl` stays a plain string placeholder or should be formally replaced/extended by a multi-source media model in Feature 09.
-- Confirm whether additional shared media/admin form abstractions should be added on top of the current component layer as Feature 09 expands teacher-facing workflows.
+- Confirm whether mobile API routes should continue using the same Clerk-backed teacher authentication model immediately in Feature 10, or whether mobile token-verification hardening needs a separate implementation pass.
+- Confirm whether student playback should ever expose raw external links directly, or whether externally linked media must always be wrapped in a controlled player surface.
+- Confirm final product policy for lesson publishability: whether lessons may exist without media indefinitely, or whether a later rule should block publishing/access until a media source is attached.
+- Confirm whether a shared media service abstraction should now be introduced before Feature 12 so future providers and playback rules do not spread Cloudinary-specific logic across multiple files.
+- Confirm whether teacher/mobile clients should continue using the existing `/api/cloudinary/upload-signature` route, or whether that should be namespaced to a dedicated teacher/mobile media route for long-term clarity.
 
 ## Architecture Decisions
 - Web starts now because the mobile side is stable enough for aligned implementation.
@@ -131,6 +90,55 @@ Do not start implementation before reading all 8 files.
 - Feature 08 confirmed ownership enforcement for teacher-managed courses by scoping reads and writes to `Course.teacherId` (Clerk user ID), preventing teachers from reading or mutating other teachers’ course records through the dashboard flow.
 - Feature 08 introduced a minimal schema extension for teacher course management by adding `Course.price` plus a teacher query index, while intentionally deferring lesson media/source modeling to Feature 09.
 - Feature 08 established the teacher web UX pattern of separate create, read-only details, and edit pages, with redirect-to-dashboard behavior after successful create/update mutations.
+- Feature 09 replaced the old single-field lesson video placeholder direction with a provider-aware lesson media model centered on a dedicated `LessonMedia` record per lesson, allowing a lesson to reference either an owned Cloudinary upload or an external video link without tying the product to one URL pattern.
+- Feature 09 established that lesson content and lesson media are separate concerns: `Lesson` remains the educational/content container, while `LessonMedia` stores media-provider metadata such as provider type, Cloudinary public ID, external URL, readiness state, and duration metadata where available.
+- Feature 09 adopted Cloudinary as the first owned-upload provider for web and future mobile flows, using signed direct upload from client to Cloudinary, server-side signature generation, authenticated signed delivery URLs for preview/playback preparation, and server-side asset cleanup through the Cloudinary SDK.
+- Feature 09 confirmed the current replacement strategy for uploaded lesson media is application-level replacement, not Cloudinary in-place overwrite: upload a new asset, save its metadata, delete the old owned asset if needed, then update the lesson media record.
+- Feature 09 introduced dedicated teacher lesson CRUD flows on top of the existing teacher course-management area:
+  - create lesson page under `app/[locale]/(teacher)/teacher/courses/[courseId]/lessons/new`
+  - lesson management/details page under `app/[locale]/(teacher)/teacher/courses/[courseId]/lessons/[lessonId]`
+  - lesson edit page under `app/[locale]/(teacher)/teacher/courses/[courseId]/lessons/[lessonId]/edit`
+- Feature 09 established the teacher UX rule that video management belongs on the dedicated lesson page, not inline on the course details page, while the course page remains a high-level lesson-management overview with actions such as manage video, edit lesson, and delete lesson.
+- Feature 09 added real lesson mutations in `lib/mutations/lesson.ts` for teacher-scoped lesson creation, update, and deletion, with ownership validation through the parent course’s `teacherId`.
+- Feature 09 added real media mutations in `lib/mutations/media.ts` for:
+  - saving Cloudinary media metadata
+  - saving external-link media metadata
+  - deleting lesson media
+  - replacing old Cloudinary assets during provider switches or re-uploads
+- Feature 09 kept web-triggered lesson/media form submissions in thin Server Actions (`actions/lesson.ts`, `actions/media.ts`) while adding matching Route Handlers for mobile/external HTTP consumers under `app/api/teacher/...`, preserving the shared cross-platform architecture instead of placing logic only in Server Actions.
+- Feature 09 established mobile/API parity for teacher lesson/media operations through Route Handlers covering:
+  - create lesson
+  - get lesson details
+  - update lesson
+  - delete lesson
+  - save Cloudinary media metadata
+  - save external-link media metadata
+  - get lesson media/preview
+  - delete lesson media
+- Feature 09 confirmed that mobile or other external clients should follow the same owned-upload pattern as web: request a server-generated Cloudinary upload signature, upload the file directly to Cloudinary, then call the app API to save the returned Cloudinary metadata against the lesson.
+- Feature 09 kept `/api/cloudinary/upload-signature` as the shared signature endpoint for now, while deferring final namespacing/authorization decisions for teacher/mobile media endpoints to later review.
+- Feature 09 added provider-aware lesson media preview behavior:
+  - for Cloudinary uploads, the backend generates signed authenticated delivery URLs using the Cloudinary SDK
+  - for external links, the backend returns the original URL as the current preview target
+- Feature 09 confirmed that authenticated Cloudinary preview links should include an explicit video format such as `mp4` when generating signed preview URLs, because raw authenticated asset URLs without a format suffix may download as unnamed files instead of opening cleanly in browser preview flows.
+- Feature 09 added teacher-side replacement/delete safeguards and UX improvements:
+  - loading state during upload
+  - success state plus toast after save
+  - persistent preview link for current media
+  - destructive delete confirmation modal for lesson media removal
+  - explicit teacher warning that replacing an uploaded video permanently deletes the previous uploaded asset to save storage space
+- Feature 09 was further refined with large-upload progress tracking inside the teacher `LessonMediaManager` flow:
+  - replaced the plain Cloudinary `fetch()` upload request with `XMLHttpRequest` so the browser can receive upload progress events
+  - added real progress percentage, uploaded bytes vs total bytes, estimated upload speed, and ETA for long video uploads such as ~200 MB lesson videos
+  - added upload cancellation support through `xhr.abort()` during active Cloudinary uploads
+  - preserved the existing architecture of direct signed client-to-Cloudinary upload followed by `saveCloudinaryMediaAction(...)`, rather than moving upload bytes through the app server
+  - kept the progress UX inside the lesson-level teacher media manager because upload progress must be tracked in the browser client, not in `lib/mutations/*` or Route Handlers
+  - replaced temporary spinner-only behavior with a more truthful teacher-facing upload state appropriate for large media files
+  - tightened local typing for the direct-upload response by replacing `Promise<any>` with a dedicated typed Cloudinary upload response shape
+- Feature 09 confirmed that deleting a lesson must also clean up its attached media state and owned uploaded asset where applicable, preventing orphaned Cloudinary files or lesson-media rows.
+- Feature 09 established that lessons may currently exist without attached media, but the missing-media state must be visually obvious in teacher management flows; final publish/access enforcement rules are intentionally deferred to Feature 12.
+- Feature 09 extended localization with Arabic-first lesson/media namespaces and maintained RTL-safe teacher flows for lesson create/edit/media management surfaces.
+- Feature 09 also introduced real teacher-facing error boundaries using localized `app/[locale]/error.tsx` and root `app/global-error.tsx` as a resilience baseline for teacher/media work, aligning with Next.js App Router error-boundary conventions.
 
 ## Session Notes
 - Mobile side is now stable enough to begin web implementation.
@@ -170,3 +178,15 @@ Do not start implementation before reading all 8 files.
 - Feature 08 shipped a real teacher dashboard backed by Neon through Prisma, with teacher-scoped course reads, real create/update/publish flows, localized Arabic-first teacher pages, and shared UI-based empty/state/form patterns instead of mock data or isolated page markup.
 - Feature 08 added shared teacher course management architecture for both web and future mobile consumers: `lib/queries/teacher.ts`, `lib/mutations/course.ts`, `actions/course.ts`, and `app/api/teacher/courses/route.ts`.
 - Feature 08 expanded the teacher UX beyond raw form entry by adding dashboard-visible course metadata, a read-only teacher course details page, dashboard return flows after create/edit, and continued use of the shared shadcn-based design system.
+- Feature 09 is now complete and verified locally.
+- Feature 09 introduced real teacher lesson management on top of teacher-owned courses: add lesson, edit lesson, delete lesson, dedicated lesson management pages, and lesson-focused media management rather than inline course-page upload controls.
+- Feature 09 replaced the old lesson `videoUrl` placeholder direction with a provider-aware lesson media system centered on Cloudinary uploads and external links, backed by dedicated media mutations and preview-aware query logic.
+- Feature 09 implemented signed direct Cloudinary upload for owned video files: the app generates upload signatures server-side, the client uploads directly to Cloudinary, then the app stores only the returned provider metadata in the database.
+- Feature 09 implemented teacher-side media replacement and deletion with backend cleanup of old Cloudinary assets, preventing orphaned owned uploads during re-upload, provider switching, media deletion, and full lesson deletion.
+- Feature 09 introduced signed authenticated Cloudinary preview URLs for teacher verification, plus persistent preview links in the teacher media UI and external-link parity for teacher-side source checking.
+- Feature 09 added lesson/media Route Handlers under `app/api/teacher/...` so the mobile app can perform the same lesson CRUD and media-management operations over HTTP without duplicating business logic.
+- Feature 09 added a Postman-ready testing flow for mobile/API parity, including lesson creation, Cloudinary signature retrieval, direct Cloudinary upload, media save, media retrieval, replacement, external-link save, media deletion, and lesson deletion.
+- Feature 09 added teacher-facing upload polish and safety improvements, including loading state, success feedback, delete confirmation, replacement warning, and dedicated lesson-level video management UX.
+- Feature 09 was further refined after completion with real large-file upload progress UX inside `LessonMediaManager`: percent complete, uploaded size, speed, ETA, cancellation support, and removal of the old spinner-only upload experience.
+- Feature 09 also established localized error-boundary coverage for teacher/media flows using App Router error conventions, reducing the chance of raw crash screens during mutation-heavy teacher operations.
+- Next implementation focus should shift to Feature 10 (manual payment and access confirmation), while keeping Feature 12 in mind for final student-facing media delivery, protection, and playback-policy enforcement.

@@ -18,6 +18,11 @@ enum EnrollmentStatus {
   confirmed
   rejected
 }
+enum MediaProvider {
+  cloudinary
+  external_link
+  backblaze_b2
+}
 
 model Profile {
   id          String   @id @default(cuid())
@@ -91,17 +96,44 @@ model Lesson {
   titleAr     String   @map("title_ar")
   titleEn     String?  @map("title_en")
   description String?
-  videoUrl    String?  @map("video_url")
+  videoUrl    String?  @map("video_url")   // @deprecated — use LessonMedia instead
   isPreview   Boolean  @default(false) @map("is_preview")
   isPublished Boolean  @default(false) @map("is_published")
   sortOrder   Int      @default(0) @map("sort_order")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  course      Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  course      Course      @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  media       LessonMedia?
 
   @@index([courseId])
   @@map("lessons")
+}
+
+model LessonMedia {
+  id String @id @default(cuid())
+  lessonId String @unique @map("lesson_id")
+
+  provider MediaProvider
+
+  // Cloudinary-specific fields
+  cloudinaryPublicId String? @map("cloudinary_public_id")
+  cloudinaryResourceType String? @default("video") @map("cloudinary_resource_type")
+
+  // External link field
+  externalUrl String? @map("external_url")
+
+  // Shared metadata
+  durationSeconds Int? @map("duration_seconds")
+  isReady Boolean @default(false) @map("is_ready")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@index([lessonId])
+  @@map("lesson_media")
 }
 
 model Enrollment {

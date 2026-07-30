@@ -1,0 +1,49 @@
+import { NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
+
+import { prisma } from "@/lib/prisma";
+import { saveCloudinaryMedia } from "@/lib/mutations/media";
+
+type Context = {
+  params: Promise<{ lessonId: string }>;
+};
+
+export async function POST(request: Request, { params }: Context) {
+  const { userId } = await auth();
+  if (!userId) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+
+  const { lessonId } = await params;
+  const body = await request.json();
+
+  const lesson = await prisma.lesson.findFirst({
+    where: {
+      id: lessonId,
+      course: { teacherId: userId },
+    },
+    select: { id: true },
+  });
+
+  if (!lesson) {
+    return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+
+  if (!body.cloudinaryPublicId) {
+    return NextResponse.json({ error: "validation_failed" }, { status: 400 });
+  }
+
+  try {
+    const media = await saveCloudinaryMedia({
+      lessonId,
+      cloudinaryPublicId: body.cloudinaryPublicId,
+      cloudinaryResourceType: body.cloudinaryResourceType ?? "video",
+      durationSeconds: body.durationSeconds ?? null,
+    });
+
+    return NextResponse.json({ data: media }, { status: 201 });
+  } catch (error) {
+    console.error("[api] save cloudinary media", error);
+    return NextResponse.json({ error: "server_error" }, { status: 500 });
+  }
+}

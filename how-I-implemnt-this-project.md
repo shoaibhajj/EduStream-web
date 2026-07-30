@@ -4956,3 +4956,1667 @@ This saves the first real teacher-owned product flow, using the shared read/writ
 - If future teacher flows need richer UI primitives such as dialog, sheet, or advanced form components, those should be added through the shared `components/ui` layer first.
 - `teacherId` as Clerk user ID should continue to be treated as the ownership key unless the project deliberately introduces a different cross-platform teacher identity mapping later.
 - Feature 10 and later monetization/access flows can safely build on the `price` field added here without reopening the teacher course basics implementation.
+
+
+
+
+------
+
+
+## Feature 09 — Course Media Source System, Teacher Upload Flow, Web/Mobile Delivery, and Postman Testing
+
+### Goal
+
+Build the real **Feature 09 media source system** for Moallem Academy so each lesson can use one of two video-source paths:
+
+- teacher-uploaded video stored in Cloudinary
+- teacher-provided external video link
+
+This feature also establishes:
+
+- lesson-level media metadata in the real database
+- a safe teacher-only upload and update flow
+- a shared server-side read layer for media playback decisions
+- a web teacher UI for attaching and updating media
+- a mobile-safe HTTP delivery path that does not depend on Server Components
+- protected playback URL generation for uploaded media
+- a clear testing path in Postman for API verification
+
+This feature is about the **real media-source architecture**, not fake file placeholders and not open public video URLs by default.
+
+---
+
+## Decisions used for this feature
+
+- The existing Neon + Prisma stack remains the database foundation.
+- Cloudinary is used as the uploaded-video storage provider.
+- A lesson can point to exactly one active media source at a time.
+- The media model must support both web and mobile, so the database stores source metadata instead of storing UI-specific assumptions.
+- External-link media is stored as a URL and opened directly.
+- Uploaded Cloudinary media is stored by metadata such as public ID, resource type, format, bytes, and duration.
+- Uploaded media playback URLs are generated on the server, never hardcoded into the client.
+- The teacher web app can call Server Actions for mutations, but mobile must use Route Handlers, so the implementation keeps business logic in shared mutation/query files.
+- Playback access is resolved from the same enrollment/access logic already established earlier in the project.
+- For uploaded protected video, the app generates a signed Cloudinary authenticated URL.
+- To make browser preview open as video instead of downloading a nameless file, the signed Cloudinary URL is generated with `format: "mp4"`.
+- Web and mobile both rely on the same server-side media decision logic, but consume it in different ways: Server Components or server actions for web, HTTP JSON endpoints for mobile.
+
+---
+
+## What this feature solves
+
+Before this feature, lessons only had a placeholder `videoUrl` string and the course detail flow could show preview / locked / accessible lesson states, but there was no real multi-source media model.
+
+Feature 09 replaces that weak single-string approach with a proper source-aware model so the app can answer these questions correctly:
+
+- Is this lesson using an uploaded video or an external link?
+- If it is uploaded, what Cloudinary asset should be used?
+- If it is external, what exact URL should open?
+- Should the current user receive a playable URL at all?
+- Should the web app open a new tab, show an inline player, or keep the lesson locked?
+- How can mobile request the same answer over HTTP?
+
+---
+
+## Step 1 — Extend the Prisma schema for lesson media sources
+
+### File to update
+
+`prisma/schema.prisma`
+
+### Code
+
+```prisma
+enum LessonMediaSourceType {
+  cloudinary_upload
+  external_link
+}
+
+model Lesson {
+  id          String   @id @default(cuid())
+  courseId    String   @map("course_id")
+  titleAr     String   @map("title_ar")
+  titleEn     String?  @map("title_en")
+  description String?
+  videoUrl    String?  @map("video_url")
+  isPreview   Boolean  @default(false) @map("is_preview")
+  isPublished Boolean  @default(false) @map("is_published")
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  media  LessonMedia?
+
+  @@index([courseId])
+  @@map("lessons")
+}
+
+model LessonMedia {
+  id                        String                @id @default(cuid())
+  lessonId                  String                @unique @map("lesson_id")
+  sourceType                LessonMediaSourceType @map("source_type")
+  externalUrl               String?               @map("external_url")
+  cloudinaryPublicId        String?               @map("cloudinary_public_id")
+  cloudinaryResourceType    String?               @map("cloudinary_resource_type")
+  cloudinaryFormat          String?               @map("cloudinary_format")
+  cloudinaryBytes           Int?                  @map("cloudinary_bytes")
+  cloudinaryDurationSeconds Float?                @map("cloudinary_duration_seconds")
+  createdAt                 DateTime              @default(now()) @map("created_at")
+  updatedAt                 DateTime              @updatedAt @map("updated_at")
+
+  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@index([sourceType])
+  @@map("lesson_media")
+}
+```
+
+### Why this matters
+
+The old `Lesson.videoUrl` field was too weak for a real product because it could not truthfully describe whether the source came from Cloudinary or from an external provider. The new `LessonMedia` table creates a proper one-to-one media record per lesson and keeps the source description normalized.
+
+### Important implementation note
+
+The old `videoUrl` field can temporarily remain during the migration period so existing code does not break immediately. After all reads are moved to `LessonMedia`, the project can later remove `videoUrl` in a cleanup feature.
+
+---
+
+## Step 2 — Apply the migration and regenerate Prisma
+
+### Command
+
+```bash
+npx prisma migrate dev --name add-lesson-media-source-system
+npx prisma generate
+```
+
+### Why this matters
+
+This creates the real `lesson_media` table in Neon and updates the Prisma client so the app can read and write the new model safely.
+
+### Verify
+
+```bash
+npx prisma studio
+```
+
+Confirm:
+
+- `lesson_media` exists
+- `lesson_id` is unique
+- `source_type` is present
+- nullable Cloudinary fields are available
+- nullable `external_url` is available
+
+---
+
+## Step 3 — Add the Cloudinary server helper
+
+### File to create
+
+`lib/cloudinary.ts`
+
+### Code
+
+```ts
+import { v2 as cloudinary } from "cloudinary";
+
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+  secure: true,
+});
+
+export { cloudinary };
+```
+
+### Why this matters
+
+Cloudinary configuration must live in one server-side place so upload handlers, signed delivery URLs, and later cleanup/delete operations all use the same connection.
+
+---
+
+## Step 4 — Add shared teacher media mutations
+
+### File to create
+
+`lib/mutations/media.ts`
+
+### Code
+
+```ts
+import "server-only";
+import { prisma } from "@/lib/prisma";
+
+type SetExternalLessonMediaInput = {
+  lessonId: string;
+  teacherId: string;
+  externalUrl: string;
+};
+
+type SetCloudinaryLessonMediaInput = {
+  lessonId: string;
+  teacherId: string;
+  cloudinaryPublicId: string;
+  cloudinaryResourceType: string;
+  cloudinaryFormat: string | null;
+  cloudinaryBytes: number | null;
+  cloudinaryDurationSeconds: number | null;
+};
+
+async function assertTeacherOwnsLesson(lessonId: string, teacherId: string) {
+  const lesson = await prisma.lesson.findUnique({
+    where: { id: lessonId },
+    select: {
+      id: true,
+      course: {
+        select: {
+          teacherId: true,
+        },
+      },
+    },
+  });
+
+  if (!lesson) {
+    throw new Error("Lesson not found");
+  }
+
+  if (lesson.course.teacherId !== teacherId) {
+    throw new Error("Not authorized to manage this lesson");
+  }
+
+  return lesson;
+}
+
+export async function setExternalLessonMedia({
+  lessonId,
+  teacherId,
+  externalUrl,
+}: SetExternalLessonMediaInput) {
+  await assertTeacherOwnsLesson(lessonId, teacherId);
+
+  return prisma.lessonMedia.upsert({
+    where: { lessonId },
+    update: {
+      sourceType: "external_link",
+      externalUrl,
+      cloudinaryPublicId: null,
+      cloudinaryResourceType: null,
+      cloudinaryFormat: null,
+      cloudinaryBytes: null,
+      cloudinaryDurationSeconds: null,
+    },
+    create: {
+      lessonId,
+      sourceType: "external_link",
+      externalUrl,
+    },
+  });
+}
+
+export async function setCloudinaryLessonMedia({
+  lessonId,
+  teacherId,
+  cloudinaryPublicId,
+  cloudinaryResourceType,
+  cloudinaryFormat,
+  cloudinaryBytes,
+  cloudinaryDurationSeconds,
+}: SetCloudinaryLessonMediaInput) {
+  await assertTeacherOwnsLesson(lessonId, teacherId);
+
+  return prisma.lessonMedia.upsert({
+    where: { lessonId },
+    update: {
+      sourceType: "cloudinary_upload",
+      externalUrl: null,
+      cloudinaryPublicId,
+      cloudinaryResourceType,
+      cloudinaryFormat,
+      cloudinaryBytes,
+      cloudinaryDurationSeconds,
+    },
+    create: {
+      lessonId,
+      sourceType: "cloudinary_upload",
+      cloudinaryPublicId,
+      cloudinaryResourceType,
+      cloudinaryFormat,
+      cloudinaryBytes,
+      cloudinaryDurationSeconds,
+    },
+  });
+}
+```
+
+### Why this matters
+
+This keeps all media-write business rules in one place:
+
+- verify the lesson exists
+- verify the lesson belongs to the signed-in teacher
+- upsert the lesson media record
+- clear the unused fields when switching source type
+
+That prevents web and mobile from drifting into different logic.
+
+---
+
+## Step 5 — Add the teacher upload API route for Cloudinary
+
+### File to create
+
+`app/api/teacher/lessons/[lessonId]/upload/route.ts`
+
+### Code
+
+```ts
+import { auth } from "@clerk/nextjs/server";
+import { NextRequest, NextResponse } from "next/server";
+import { cloudinary } from "@/lib/cloudinary";
+import { setCloudinaryLessonMedia } from "@/lib/mutations/media";
+
+export async function POST(
+  req: NextRequest,
+  { params }: { params: Promise<{ lessonId: string }> }
+) {
+  try {
+    const { userId } = await auth();
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { lessonId } = await params;
+    const formData = await req.formData();
+    const file = formData.get("file");
+
+    if (!(file instanceof File)) {
+      return NextResponse.json({ error: "File is required" }, { status: 400 });
+    }
+
+    const arrayBuffer = await file.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    const uploadResult = await new Promise<any>((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream(
+        {
+          resource_type: "video",
+          folder: "moallem-academy/lessons",
+          type: "authenticated",
+        },
+        (error, result) => {
+          if (error) return reject(error);
+          resolve(result);
+        }
+      );
+
+      stream.end(buffer);
+    });
+
+    await setCloudinaryLessonMedia({
+      lessonId,
+      teacherId: userId,
+      cloudinaryPublicId: uploadResult.public_id,
+      cloudinaryResourceType: uploadResult.resource_type,
+      cloudinaryFormat: uploadResult.format ?? null,
+      cloudinaryBytes: uploadResult.bytes ?? null,
+      cloudinaryDurationSeconds: uploadResult.duration ?? null,
+    });
+
+    return NextResponse.json({
+      success: true,
+      media: {
+        lessonId,
+        sourceType: "cloudinary_upload",
+        cloudinaryPublicId: uploadResult.public_id,
+        format: uploadResult.format ?? null,
+        bytes: uploadResult.bytes ?? null,
+        duration: uploadResult.duration ?? null,
+      },
+    });
+  } catch (error) {
+    console.error("[teacher lesson upload] POST error:", error);
+    return NextResponse.json({ error: "Upload failed" }, { status: 500 });
+  }
+}
+```
+
+### Why this matters
+
+This is the real web/mobile-safe upload boundary. The file is received by the server, streamed into Cloudinary, and only then is the database updated. The browser or mobile client never writes Cloudinary metadata directly into Neon on its own.
+
+---
+
+## Step 6 — Add the teacher external-link API route
+
+### File to create
+
+`app/api/teacher/lessons/[lessonId]/external-link/route.ts`
+
+### Code
+
+```ts
+import { auth } from "@clerk/nextjs/server";
+import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import { setExternalLessonMedia } from "@/lib/mutations/media";
+
+const schema = z.object({
+  externalUrl: z.string().url(),
+});
+
+export async function POST(
+  req: NextRequest,
+  { params }: { params: Promise<{ lessonId: string }> }
+) {
+  try {
+    const { userId } = await auth();
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { lessonId } = await params;
+    const body = await req.json();
+    const parsed = schema.safeParse(body);
+
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid external URL" }, { status: 400 });
+    }
+
+    const media = await setExternalLessonMedia({
+      lessonId,
+      teacherId: userId,
+      externalUrl: parsed.data.externalUrl,
+    });
+
+    return NextResponse.json({ success: true, media });
+  } catch (error) {
+    console.error("[teacher lesson external-link] POST error:", error);
+    return NextResponse.json({ error: "Failed to save external link" }, { status: 500 });
+  }
+}
+```
+
+### Why this matters
+
+This route gives the teacher a second supported source path without mixing external-link validation into the upload route.
+
+---
+
+## Step 7 — Add shared media query logic
+
+### File to create
+
+`lib/queries/media.ts`
+
+### Code
+
+```ts
+import "server-only";
+import { cloudinary } from "@/lib/cloudinary";
+import { prisma } from "@/lib/prisma";
+import { getStudentEnrollmentForCourse } from "@/lib/queries/course";
+
+export async function getLessonMediaByLessonId(lessonId: string) {
+  return prisma.lesson.findUnique({
+    where: { id: lessonId },
+    select: {
+      id: true,
+      titleAr: true,
+      titleEn: true,
+      isPreview: true,
+      isPublished: true,
+      courseId: true,
+      media: true,
+      course: {
+        select: {
+          id: true,
+          isPublished: true,
+        },
+      },
+    },
+  });
+}
+
+export async function getProtectedPlaybackUrl(media: {
+  sourceType: "cloudinary_upload" | "external_link";
+  externalUrl: string | null;
+  cloudinaryPublicId: string | null;
+  cloudinaryResourceType: string | null;
+}) {
+  if (media.sourceType === "external_link") {
+    return media.externalUrl;
+  }
+
+  if (!media.cloudinaryPublicId) {
+    return null;
+  }
+
+  const url = cloudinary.url(media.cloudinaryPublicId, {
+    resource_type:
+      (media.cloudinaryResourceType as "video" | "image" | "raw") ?? "video",
+    sign_url: true,
+    expires_at: Math.round(Date.now() / 1000) + 600,
+    type: "authenticated",
+    format: "mp4",
+  });
+
+  return url;
+}
+
+export async function canUserAccessLessonMedia(input: {
+  lessonId: string;
+  profileId: string | null;
+}) {
+  const lesson = await getLessonMediaByLessonId(input.lessonId);
+
+  if (!lesson || !lesson.isPublished || !lesson.course.isPublished || !lesson.media) {
+    return {
+      allowed: false,
+      reason: "not_found",
+      lesson: null,
+      playbackUrl: null,
+    } as const;
+  }
+
+  if (lesson.isPreview) {
+    return {
+      allowed: true,
+      reason: "preview",
+      lesson,
+      playbackUrl: await getProtectedPlaybackUrl(lesson.media),
+    } as const;
+  }
+
+  if (!input.profileId) {
+    return {
+      allowed: false,
+      reason: "auth_required",
+      lesson,
+      playbackUrl: null,
+    } as const;
+  }
+
+  const enrollment = await getStudentEnrollmentForCourse(input.profileId, lesson.courseId);
+
+  if (!enrollment || enrollment.status !== "confirmed") {
+    return {
+      allowed: false,
+      reason: "not_enrolled",
+      lesson,
+      playbackUrl: null,
+    } as const;
+  }
+
+  return {
+    allowed: true,
+    reason: "confirmed",
+    lesson,
+    playbackUrl: await getProtectedPlaybackUrl(lesson.media),
+  } as const;
+}
+```
+
+### Why this matters
+
+This file becomes the single source of truth for playback decisions. It answers both access control and delivery URL generation in one shared layer that web and mobile can both reuse.
+
+### Important bug fixed in this feature
+
+When the Cloudinary signed authenticated URL was generated without an explicit output format, the browser opened a new tab and downloaded a file named only by the public ID, without a useful extension. The fix was to generate the URL with:
+
+```ts
+format: "mp4"
+```
+
+That made the signed Cloudinary URL resolve as a real video resource that browsers can treat like video instead of a generic downloadable file.
+
+---
+
+## Step 8 — Add a mobile-safe lesson playback API route
+
+### File to create
+
+`app/api/lessons/[lessonId]/playback/route.ts`
+
+### Code
+
+```ts
+import { auth } from "@clerk/nextjs/server";
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { canUserAccessLessonMedia } from "@/lib/queries/media";
+
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ lessonId: string }> }
+) {
+  try {
+    const { userId } = await auth();
+    const { lessonId } = await params;
+
+    let profileId: string | null = null;
+
+    if (userId) {
+      const profile = await prisma.profile.findUnique({
+        where: { clerkUserId: userId },
+        select: { id: true },
+      });
+      profileId = profile?.id ?? null;
+    }
+
+    const result = await canUserAccessLessonMedia({
+      lessonId,
+      profileId,
+    });
+
+    if (!result.lesson) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+
+    if (!result.allowed) {
+      return NextResponse.json(
+        {
+          allowed: false,
+          reason: result.reason,
+        },
+        { status: result.reason === "auth_required" ? 401 : 403 }
+      );
+    }
+
+    return NextResponse.json({
+      allowed: true,
+      reason: result.reason,
+      sourceType: result.lesson.media?.sourceType ?? null,
+      playbackUrl: result.playbackUrl,
+    });
+  } catch (error) {
+    console.error("[lesson playback] GET error:", error);
+    return NextResponse.json({ error: "Server error" }, { status: 500 });
+  }
+}
+```
+
+### Why this matters
+
+Mobile cannot import server-only query logic or open a Server Component page to get the playback URL. This API route gives mobile one clean JSON response that says whether the lesson is allowed and, if allowed, which URL to open.
+
+---
+
+## Step 9 — Add teacher-side web actions as thin wrappers
+
+### File to create
+
+`actions/media.ts`
+
+### Code
+
+```ts
+"use server";
+
+import { auth } from "@clerk/nextjs/server";
+import { revalidatePath } from "next/cache";
+import { setExternalLessonMedia } from "@/lib/mutations/media";
+
+export async function saveExternalLessonMediaAction(input: {
+  lessonId: string;
+  externalUrl: string;
+  locale: string;
+}) {
+  const { userId } = await auth();
+
+  if (!userId) {
+    throw new Error("Unauthorized");
+  }
+
+  await setExternalLessonMedia({
+    lessonId: input.lessonId,
+    teacherId: userId,
+    externalUrl: input.externalUrl,
+  });
+
+  revalidatePath(`/${input.locale}/teacher/courses`);
+}
+```
+
+### Why this matters
+
+The project pattern is consistent:
+
+- shared business logic in `lib/mutations/*`
+- thin Server Action wrapper for web-only forms
+- thin Route Handler wrapper for mobile or HTTP access
+
+---
+
+## Step 10 — Build the teacher web media-management UI
+
+### Files to create or update
+
+- `components/teacher/lesson-media-form.tsx`
+- `app/[locale]/(teacher)/teacher/lessons/[lessonId]/media/page.tsx`
+
+### Example page code
+
+```tsx
+import { auth } from "@clerk/nextjs/server";
+import { notFound } from "next/navigation";
+import { prisma } from "@/lib/prisma";
+import { LessonMediaForm } from "@/components/teacher/lesson-media-form";
+
+export default async function TeacherLessonMediaPage({
+  params,
+}: {
+  params: Promise<{ locale: string; lessonId: string }>;
+}) {
+  const { userId } = await auth();
+  if (!userId) notFound();
+
+  const { locale, lessonId } = await params;
+
+  const lesson = await prisma.lesson.findUnique({
+    where: { id: lessonId },
+    include: {
+      media: true,
+      course: {
+        select: {
+          teacherId: true,
+          nameAr: true,
+          nameEn: true,
+        },
+      },
+    },
+  });
+
+  if (!lesson || lesson.course.teacherId !== userId) {
+    notFound();
+  }
+
+  return (
+    <main className="mx-auto max-w-3xl px-6 py-10">
+      <LessonMediaForm locale={locale} lesson={lesson} />
+    </main>
+  );
+}
+```
+
+### What the form should do
+
+The teacher page should present two source choices:
+
+- **External link mode**: text input + save button
+- **Upload mode**: file input + upload button
+
+It should also show current media status such as:
+
+- current source type
+- Cloudinary public ID if uploaded
+- external URL if linked
+- upload success or error message
+- preview/open button after save
+
+### Why this matters
+
+Feature 09 is not complete if the backend exists but the teacher has no real UI to attach media to a lesson.
+
+---
+
+## Step 11 — How the web playback path works
+
+### Web flow used
+
+For the web app, the playback/open logic works like this:
+
+1. The student reaches the course detail page.
+2. The page already knows which lessons are preview, locked, or accessible.
+3. When the student clicks a lesson play/open action, the app requests the lesson playback decision from the server.
+4. If the lesson uses an external link, the app opens that URL in a new tab.
+5. If the lesson uses a Cloudinary upload, the server generates a signed authenticated playback URL.
+6. That signed URL is opened in a new tab, or used inside a `<video controls>` player.
+
+### Why this matters
+
+The browser must never guess whether a lesson is accessible. The server decides first, then returns the final URL only for allowed cases.
+
+### Important browser behavior note
+
+External links naturally open like normal URLs because they come from a video-hosting provider that already serves browser-friendly playback pages.
+
+Cloudinary authenticated media behaves differently because it is a protected asset delivery URL, not a hosted watch page. That is why the app had to explicitly generate the signed URL in `mp4` format to make browser behavior correct for preview/open flows.
+
+---
+
+## Step 12 — How the mobile playback path works
+
+### Mobile flow used
+
+For mobile, the implementation follows the same business rules but through an API boundary:
+
+1. Mobile calls `GET /api/lessons/:lessonId/playback`.
+2. The server identifies the signed-in user.
+3. The server resolves the matching app profile.
+4. The server checks whether the lesson is preview content or whether the student has a confirmed enrollment.
+5. If access is allowed, the server returns JSON containing `playbackUrl` and `sourceType`.
+6. The mobile app then opens the returned URL inside its video player or web view flow.
+
+### Why this matters
+
+React Native cannot use Server Actions or import server-only files, so the shared logic had to be wrapped behind HTTP while still keeping the real access rules centralized on the server.
+
+---
+
+## Step 13 — Add localized strings for the teacher media UI
+
+### Files to update
+
+- `messages/ar.json`
+- `messages/en.json`
+
+### Code
+
+```json
+"TeacherLessonMedia": {
+  "title": "إدارة فيديو الدرس",
+  "sourceType": "نوع المصدر",
+  "externalLink": "رابط خارجي",
+  "uploadVideo": "رفع فيديو",
+  "externalUrlLabel": "رابط الفيديو الخارجي",
+  "videoFileLabel": "ملف الفيديو",
+  "saveExternal": "حفظ الرابط",
+  "uploadNow": "رفع الآن",
+  "currentMedia": "الوسائط الحالية",
+  "openPreview": "فتح المعاينة",
+  "uploadSuccess": "تم رفع الفيديو بنجاح",
+  "saveSuccess": "تم حفظ الرابط بنجاح",
+  "errorGeneric": "حدث خطأ أثناء حفظ الوسائط"
+}
+```
+
+```json
+"TeacherLessonMedia": {
+  "title": "Lesson video management",
+  "sourceType": "Source type",
+  "externalLink": "External link",
+  "uploadVideo": "Upload video",
+  "externalUrlLabel": "External video URL",
+  "videoFileLabel": "Video file",
+  "saveExternal": "Save link",
+  "uploadNow": "Upload now",
+  "currentMedia": "Current media",
+  "openPreview": "Open preview",
+  "uploadSuccess": "Video uploaded successfully",
+  "saveSuccess": "Link saved successfully",
+  "errorGeneric": "An error occurred while saving media"
+}
+```
+
+### Why this matters
+
+Feature 09 adds a teacher-facing management surface, so all visible labels and result messages must stay localized like the rest of the project.
+
+---
+
+## Step 14 — Local verification used for this feature
+
+### Commands
+
+```bash
+npx prisma migrate dev --name add-lesson-media-source-system
+npx prisma generate
+npm run dev
+npx tsc --noEmit
+npm run build
+```
+
+### What to verify on web
+
+- Teacher can open the lesson media management page.
+- Teacher can paste an external URL and save it.
+- The `lesson_media` row is created with `source_type = external_link`.
+- Teacher can upload a video file.
+- The file is uploaded to Cloudinary under `moallem-academy/lessons`.
+- The `lesson_media` row is updated to `source_type = cloudinary_upload`.
+- Cloudinary metadata is saved in Neon.
+- Switching from upload to external link clears old Cloudinary fields.
+- Switching from external link to upload clears old external URL.
+- A preview lesson can return a playback URL even without confirmed enrollment.
+- A locked lesson does not return a playback URL for unauthenticated or unconfirmed users.
+- A confirmed enrollment returns a playable URL.
+- Cloudinary preview opens as video instead of downloading a file with no extension.
+
+### What to verify for mobile
+
+- `GET /api/lessons/:lessonId/playback` returns `401` when auth is required and missing.
+- The same endpoint returns `403` when the lesson is locked and enrollment is not confirmed.
+- The same endpoint returns `200` plus `playbackUrl` when the lesson is preview or confirmed.
+- The returned `sourceType` matches the saved media row.
+
+---
+
+## Step 15 — How to test Feature 09 from Postman
+
+### A. Test external-link save route
+
+#### Request
+
+- Method: `POST`
+- URL: `http://localhost:3000/api/teacher/lessons/<LESSON_ID>/external-link`
+- Auth: include the same session/cookie flow used by the signed-in teacher in local development
+- Headers:
+
+```text
+Content-Type: application/json
+```
+
+- Body:
+
+```json
+{
+  "externalUrl": "https://www.youtube.com/watch?v=example"
+}
+```
+
+#### Expected result
+
+- Status: `200`
+- JSON contains `success: true`
+- Database row is created or updated in `lesson_media`
+
+#### Failure cases to test
+
+- invalid URL should return `400`
+- missing auth should return `401`
+- lesson owned by another teacher should return `500` unless later mapped to `403`
+
+---
+
+### B. Test Cloudinary upload route
+
+#### Request
+
+- Method: `POST`
+- URL: `http://localhost:3000/api/teacher/lessons/<LESSON_ID>/upload`
+- Auth: include teacher session/cookies
+- Body type: `form-data`
+- Key:
+  - `file` → choose a real `.mp4` file
+
+#### Expected result
+
+- Status: `200`
+- JSON returns:
+  - `success: true`
+  - `sourceType: cloudinary_upload` inside the payload
+  - `cloudinaryPublicId`
+- A new asset appears in Cloudinary
+- The matching `lesson_media` row is updated in Neon
+
+#### Failure cases to test
+
+- no file should return `400`
+- missing auth should return `401`
+- unsupported ownership should fail
+
+---
+
+### C. Test lesson playback route for preview lesson
+
+#### Request
+
+- Method: `GET`
+- URL: `http://localhost:3000/api/lessons/<PREVIEW_LESSON_ID>/playback`
+
+#### Expected result
+
+For a published preview lesson with valid media:
+
+- Status: `200`
+- JSON contains:
+
+```json
+{
+  "allowed": true,
+  "reason": "preview",
+  "sourceType": "external_link",
+  "playbackUrl": "https://..."
+}
+```
+
+or, for uploaded Cloudinary media:
+
+```json
+{
+  "allowed": true,
+  "reason": "preview",
+  "sourceType": "cloudinary_upload",
+  "playbackUrl": "https://res.cloudinary.com/...mp4?..."
+}
+```
+
+---
+
+### D. Test lesson playback route for locked lesson without enrollment
+
+#### Request
+
+- Method: `GET`
+- URL: `http://localhost:3000/api/lessons/<LOCKED_LESSON_ID>/playback`
+
+#### Expected result
+
+- Status: `401` if sign-in is required and user is not authenticated
+- or `403` if user is authenticated but not confirmed for the course
+
+Typical JSON:
+
+```json
+{
+  "allowed": false,
+  "reason": "not_enrolled"
+}
+```
+
+---
+
+### E. Test lesson playback route for confirmed student
+
+#### Setup first
+
+Use Prisma Studio or the database to make sure there is a matching `enrollments` row:
+
+- `profile_id` belongs to the signed-in student
+- `course_id` matches the lesson's course
+- `status = confirmed`
+
+#### Request
+
+- Method: `GET`
+- URL: `http://localhost:3000/api/lessons/<LOCKED_LESSON_ID>/playback`
+- Auth: signed-in student session/cookies
+
+#### Expected result
+
+- Status: `200`
+- JSON contains `allowed: true`
+- `playbackUrl` is present
+
+---
+
+## Step 16 — Notes about auth in Postman
+
+Because these teacher and student endpoints depend on Clerk authentication, Postman testing in local development usually needs one of these approaches:
+
+- copy the authenticated browser cookies into Postman
+- use a temporary development-only test route that injects a known user for local debugging
+- use Postman Interceptor so the signed-in browser session can be reused
+
+The safest real-project approach is to test with the actual authenticated cookies from the browser session, because it verifies the route exactly as the web app uses it.
+
+---
+
+## Step 17 — Commit the feature
+
+### Command
+
+```bash
+git add .
+git commit -m "feat(09): add lesson media source system and protected playback flow"
+git push origin main
+```
+
+### Why this matters
+
+This saves the real multi-source lesson media architecture, the teacher media-management flow, the protected playback delivery logic, and the mobile-safe HTTP playback route in one coherent feature.
+
+---
+
+## Feature 09 completion checklist
+
+- [x] `LessonMedia` model added as a real one-to-one lesson media table
+- [x] Media source type supports both `cloudinary_upload` and `external_link`
+- [x] Shared media mutation layer added in `lib/mutations/media.ts`
+- [x] Shared media query/access layer added in `lib/queries/media.ts`
+- [x] Teacher upload route added for Cloudinary video uploads
+- [x] Teacher external-link route added
+- [x] Teacher lesson media web page added
+- [x] Mobile-safe playback route added at `GET /api/lessons/[lessonId]/playback`
+- [x] Protected Cloudinary authenticated delivery URLs generated on the server
+- [x] Cloudinary preview-download issue fixed by generating signed playback URLs with `format: "mp4"`
+- [x] Web and mobile both use the same server-side media decision logic
+- [x] Localization added for teacher media management UI
+- [x] Feature tested through web flow, mobile-safe JSON flow, and Postman requests
+
+---
+
+## Notes for future features
+
+- A later cleanup feature can safely remove `Lesson.videoUrl` once all reads fully depend on `LessonMedia`.
+- A later UX feature can replace new-tab video opening with an inline secure video player component for a smoother teacher and student experience.
+- If the mobile app later uploads directly to Cloudinary, it should still finalize the database update through the server so ownership and lesson linkage remain trusted.
+- Future analytics can track which source type is most used per lesson without changing the schema again.
+
+
+
+### Feature 09 update — Improve Cloudinary upload UX for large lesson videos
+
+After the first working version of Feature 09 was completed, the teacher upload flow still had one weak point: when a teacher uploaded a large video file such as 150 MB or 200 MB, the UI only showed a loading spinner during the Cloudinary upload. That was technically correct, but it was not a good real product experience because the teacher could not tell how much had uploaded, whether the upload was healthy, or how long remained.
+
+To fix that, the upload experience was upgraded inside the existing teacher lesson media component instead of introducing a separate upload page or replacing the whole media architecture.
+
+---
+
+## Why the change was made
+
+The first implementation already supported the full Cloudinary media flow:
+
+- generate a signed upload signature from the app
+- upload the video directly from the browser to Cloudinary
+- receive the Cloudinary asset response
+- call the app action to save the media metadata to the lesson
+- refresh the lesson page and show preview/success state
+
+The missing piece was progress visibility during the direct upload itself. Since the upload goes from browser to Cloudinary, the progress state has to be tracked in the browser client, not in `lib/mutations/*`, not in Prisma code, and not in the lesson media query layer.
+
+That is why this improvement was implemented inside `LessonMediaManager`.
+
+---
+
+## Where the update was applied
+
+### File updated
+
+`components/teacher/LessonMediaManager.tsx`
+
+This is the correct place because this component already owns:
+
+- source-type switching between Cloudinary and external link
+- Cloudinary upload flow
+- external-link save flow
+- preview link rendering
+- media delete action
+- upload success/error feedback
+
+The upload progress feature belongs to this same lesson-level teacher media manager because the browser is the only layer that can receive real upload-progress events while sending the file to Cloudinary.
+
+---
+
+## Architectural decision kept unchanged
+
+The upload architecture itself was not replaced. The app still uses the same Feature 09 direct-upload flow:
+
+1. The teacher selects a video file in the lesson media manager.
+2. The client requests a signature from `/api/cloudinary/upload-signature`.
+3. The client uploads the file directly to Cloudinary.
+4. After Cloudinary accepts the upload, the client calls `saveCloudinaryMediaAction(...)`.
+5. The server saves the Cloudinary metadata against the lesson.
+6. The page refreshes and shows the updated media state.
+
+This means the app still avoids streaming the full video file through the application server, which keeps the architecture lighter and closer to the mobile-friendly provider pattern already established for Feature 09.
+
+---
+
+## What was changed in the upload implementation
+
+The old upload code used `fetch()` to send the file to Cloudinary. That worked functionally, but it did not provide browser upload-progress events in a practical way for the teacher UI.
+
+So the implementation changed only the Cloudinary upload request method:
+
+- old approach: `fetch(...)`
+- new approach: `XMLHttpRequest`
+
+The reason is that `XMLHttpRequest.upload.onprogress` gives real byte-level upload progress events from the browser while the file is being sent to Cloudinary.
+
+This made it possible to show:
+
+- percent complete
+- uploaded bytes vs total file size
+- upload speed
+- estimated time remaining
+- cancel upload action
+
+---
+
+## State added to the component
+
+A new typed progress state was added to `LessonMediaManager` so the component can render truthful progress information during large uploads.
+
+### Code added
+
+```ts
+type UploadProgressState = {
+  progress: number;
+  uploadedBytes: number;
+  totalBytes: number;
+  speedBps: number;
+  etaSeconds: number | null;
+};
+
+type CloudinaryUploadResponse = {
+  public_id: string;
+  duration?: number;
+};
+```
+
+This state tracks:
+
+- `progress` — integer percentage for the progress bar
+- `uploadedBytes` — how many bytes have been sent so far
+- `totalBytes` — full file size
+- `speedBps` — current upload speed in bytes per second
+- `etaSeconds` — estimated remaining time
+
+The dedicated `CloudinaryUploadResponse` type was also added so the upload promise no longer used `Promise<any>`, which fixed the ESLint error about `Unexpected any`.
+
+---
+
+## New local state and refs added
+
+### Code added
+
+```ts
+const [uploadProgress, setUploadProgress] = useState<UploadProgressState>({
+  progress: 0,
+  uploadedBytes: 0,
+  totalBytes: 0,
+  speedBps: 0,
+  etaSeconds: null,
+});
+
+const xhrRef = useRef<XMLHttpRequest | null>(null);
+```
+
+`uploadProgress` stores the live progress values used by the UI.
+
+`xhrRef` stores the active `XMLHttpRequest` instance so the teacher can cancel the upload with `xhr.abort()` while the file is still being sent.
+
+---
+
+## Helper functions added for display formatting
+
+Because raw bytes and raw seconds are not useful teacher-facing values, helper functions were added inside the component to format progress details into readable text.
+
+### Code added
+
+```ts
+function formatBytes(bytes: number) {
+  if (!bytes) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  const index = Math.min(
+    Math.floor(Math.log(bytes) / Math.log(1024)),
+    units.length - 1
+  );
+  const value = bytes / Math.pow(1024, index);
+  return `${value.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+}
+
+function formatEta(seconds: number | null) {
+  if (seconds == null || !Number.isFinite(seconds)) return "Calculating...";
+  if (seconds < 60) return `${Math.ceil(seconds)} sec left`;
+
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = Math.ceil(seconds % 60);
+
+  if (minutes < 60) {
+    return `${minutes} min ${remainingSeconds} sec left`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+
+  return `${hours} hr ${remainingMinutes} min left`;
+}
+```
+
+These helpers are used only for the teacher-facing progress UI and do not affect database or provider logic.
+
+---
+
+## Cloudinary upload function changed from spinner-only to progress-aware
+
+The main logic change happened inside:
+
+`handleCloudinaryUploadAndSave()`
+
+The upload flow still starts the same way by requesting the upload signature from the app. That part stayed unchanged.
+
+The actual file upload step was replaced with a Promise wrapping `XMLHttpRequest`.
+
+### Updated upload code
+
+```ts
+async function handleCloudinaryUploadAndSave() {
+  if (!uploadFile) return;
+
+  setUploadError(null);
+  setUploadSuccess(false);
+  setIsUploading(true);
+  setUploadProgress({
+    progress: 0,
+    uploadedBytes: 0,
+    totalBytes: uploadFile.size,
+    speedBps: 0,
+    etaSeconds: null,
+  });
+
+  try {
+    const sigRes = await fetch("/api/cloudinary/upload-signature");
+    if (!sigRes.ok) throw new Error("signature_failed");
+
+    const { signature, timestamp, cloudName, apiKey, folder, type } =
+      await sigRes.json();
+
+    const fd = new FormData();
+    fd.append("file", uploadFile);
+    fd.append("api_key", apiKey);
+    fd.append("timestamp", String(timestamp));
+    fd.append("signature", signature);
+    fd.append("folder", folder);
+    fd.append("resource_type", "video");
+    fd.append("type", type);
+
+    const uploadData = await new Promise<CloudinaryUploadResponse>(
+      (resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhrRef.current = xhr;
+
+        const startedAt = Date.now();
+
+        xhr.open(
+          "POST",
+          `https://api.cloudinary.com/v1_1/${cloudName}/video/upload`,
+          true
+        );
+
+        xhr.upload.onprogress = (event) => {
+          if (!event.lengthComputable) return;
+
+          const uploadedBytes = event.loaded;
+          const totalBytes = event.total;
+          const progress = Math.round((uploadedBytes / totalBytes) * 100);
+
+          const elapsedSeconds = (Date.now() - startedAt) / 1000;
+          const speedBps = elapsedSeconds > 0 ? uploadedBytes / elapsedSeconds : 0;
+          const remainingBytes = totalBytes - uploadedBytes;
+          const etaSeconds = speedBps > 0 ? remainingBytes / speedBps : null;
+
+          setUploadProgress({
+            progress,
+            uploadedBytes,
+            totalBytes,
+            speedBps,
+            etaSeconds,
+          });
+        };
+
+        xhr.onload = () => {
+          try {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              const json = JSON.parse(xhr.responseText) as CloudinaryUploadResponse;
+              resolve(json);
+            } else {
+              reject(new Error("upload_failed"));
+            }
+          } catch {
+            reject(new Error("upload_failed"));
+          }
+        };
+
+        xhr.onerror = () => reject(new Error("upload_failed"));
+        xhr.onabort = () => reject(new Error("upload_cancelled"));
+
+        xhr.send(fd);
+      }
+    );
+
+    const saveForm = new FormData();
+    saveForm.append("lessonId", lessonId);
+    saveForm.append("cloudinaryPublicId", uploadData.public_id);
+    saveForm.append("cloudinaryResourceType", "video");
+
+    if (uploadData.duration) {
+      saveForm.append(
+        "durationSeconds",
+        String(Math.round(uploadData.duration))
+      );
+    }
+
+    const result = await saveCloudinaryMediaAction(saveForm);
+    if (result.error) throw new Error(result.error);
+
+    setUploadFile(null);
+    setUploadSuccess(true);
+    setUploadProgress((prev) => ({
+      ...prev,
+      progress: 100,
+      uploadedBytes: prev.totalBytes,
+      etaSeconds: 0,
+    }));
+
+    toast.success(t("successSave"));
+    router.refresh();
+  } catch (err) {
+    console.error("[LessonMediaManager] upload failed", err);
+
+    if (err instanceof Error && err.message === "upload_cancelled") {
+      setUploadError("Upload canceled.");
+    } else {
+      setUploadError(t("errorUpload"));
+    }
+  } finally {
+    setIsUploading(false);
+    xhrRef.current = null;
+  }
+}
+```
+
+---
+
+## How progress calculation works
+
+Inside `xhr.upload.onprogress`, the browser gives two important values:
+
+- `event.loaded`
+- `event.total`
+
+Using those values, the implementation calculates:
+
+### Progress percentage
+
+```ts
+const progress = Math.round((uploadedBytes / totalBytes) * 100);
+```
+
+### Upload speed
+
+```ts
+const elapsedSeconds = (Date.now() - startedAt) / 1000;
+const speedBps = elapsedSeconds > 0 ? uploadedBytes / elapsedSeconds : 0;
+```
+
+### Estimated remaining time
+
+```ts
+const remainingBytes = totalBytes - uploadedBytes;
+const etaSeconds = speedBps > 0 ? remainingBytes / speedBps : null;
+```
+
+This keeps the UI honest for large uploads and avoids the “frozen spinner” feeling.
+
+---
+
+## Cancel support added
+
+The new upload flow also added real cancellation support while the upload is still in progress.
+
+### Code added
+
+```ts
+function handleCancelUpload() {
+  xhrRef.current?.abort();
+}
+```
+
+When this runs, the browser cancels the active Cloudinary upload request. The upload promise rejects with `upload_cancelled`, and the component shows a cancel message instead of pretending the upload failed unexpectedly.
+
+This is especially useful for teachers who selected the wrong file or want to stop a very large upload before it completes.
+
+---
+
+## UI changed from overlay spinner to real progress panel
+
+The old implementation used a full overlay spinner during upload. That hid the form and only showed that “something” was happening.
+
+The improved version replaces that with a visible progress block inside the Cloudinary section.
+
+### Code added in the Cloudinary block
+
+```tsx
+{isUploading && (
+  <div className="rounded-md border border-border bg-background p-3 space-y-3">
+    <div className="flex items-center justify-between text-sm">
+      <span className="font-medium text-text-primary">
+        {uploadProgress.progress}%
+      </span>
+      <span className="text-text-secondary">
+        {formatBytes(uploadProgress.uploadedBytes)} /{" "}
+        {formatBytes(uploadProgress.totalBytes)}
+      </span>
+    </div>
+
+    <div className="h-2.5 overflow-hidden rounded-full bg-muted">
+      <div
+        className="h-full rounded-full bg-accent transition-all duration-300"
+        style={{ width: `${uploadProgress.progress}%` }}
+      />
+    </div>
+
+    <div className="flex flex-wrap gap-4 text-xs text-text-secondary">
+      <span>Speed: {formatBytes(uploadProgress.speedBps)}/s</span>
+      <span>ETA: {formatEta(uploadProgress.etaSeconds)}</span>
+    </div>
+  </div>
+)}
+```
+
+This gives the teacher four pieces of useful information:
+
+- current percent complete
+- uploaded size vs total size
+- current upload speed
+- estimated time remaining
+
+---
+
+## Cancel button added beside the upload button
+
+### Code added
+
+```tsx
+<div className="flex flex-wrap gap-2">
+  <Button
+    onClick={handleCloudinaryUploadAndSave}
+    disabled={!uploadFile || busy}
+  >
+    {isUploading ? (
+      <>
+        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+        {t("uploading")}
+      </>
+    ) : (
+      t("uploadButton")
+    )}
+  </Button>
+
+  {isUploading && (
+    <Button
+      type="button"
+      variant="outline"
+      onClick={handleCancelUpload}
+    >
+      Cancel
+    </Button>
+  )}
+</div>
+```
+
+This preserves the normal upload button but adds a second action only while upload is active.
+
+---
+
+## Why this was kept inside LessonMediaManager instead of moving to another layer
+
+This was an important architecture choice.
+
+The progress feature was intentionally **not** moved into:
+
+- `lib/mutations/media.ts`
+- `actions/media.ts`
+- `app/api/teacher/...`
+- server-only query code
+
+The reason is simple:
+
+upload progress belongs to the browser transport layer, not to the business-logic layer.
+
+The server can validate the teacher, sign the upload, save metadata, and enforce ownership. But only the browser can know how many bytes have already been sent during the active direct upload request.
+
+That is why the final implementation keeps:
+
+- business logic in the existing shared mutation/action layers
+- progress tracking in the client-side `LessonMediaManager`
+
+This matches the cross-platform architecture already established earlier in the project.
+
+---
+
+## Important TypeScript / ESLint fix made during this update
+
+During this improvement, one lint issue appeared in the Promise wrapping the upload request:
+
+```ts
+const uploadData = await new Promise<any>((resolve, reject) => {
+```
+
+This triggered:
+
+`Unexpected any. Specify a different type.`
+
+It was fixed by introducing a dedicated typed response shape for Cloudinary:
+
+```ts
+type CloudinaryUploadResponse = {
+  public_id: string;
+  duration?: number;
+};
+```
+
+Then the Promise was changed to:
+
+```ts
+const uploadData = await new Promise<CloudinaryUploadResponse>(
+  (resolve, reject) => {
+    // upload logic
+  }
+);
+```
+
+This kept the code aligned with ESLint rules and made the upload result safer to use.
+
+---
+
+## What stayed unchanged after this update
+
+This improvement did **not** change:
+
+- the `LessonMedia` data model
+- the media provider strategy
+- the save/delete actions
+- the lesson ownership checks
+- the preview URL logic
+- the external-link flow
+- the signed Cloudinary preview fix using `format: "mp4"`
+- the mobile/API parity architecture
+
+It only improved the teacher experience during large direct uploads.
+
+---
+
+## What to verify after this update
+
+Run the app:
+
+```bash
+npm run dev
+```
+
+Then verify on a teacher lesson page:
+
+- choose Cloudinary as the source
+- select a large video file such as 100 MB to 200 MB
+- click upload
+- confirm the UI shows:
+  - percentage
+  - uploaded bytes / total bytes
+  - speed
+  - ETA
+- confirm cancel works before upload completes
+- confirm successful upload still saves the media metadata correctly
+- confirm the page refreshes after success
+- confirm the teacher still gets the preview link after save
+
+Also verify the usual checks still pass:
+
+```bash
+npx tsc --noEmit
+npm run build
+```
+
+---
+
+## Final result of this update
+
+Feature 09 now has a more production-ready teacher upload experience.
+
+The teacher no longer sees only a generic spinner while a large video uploads. The UI now gives truthful feedback for long uploads while preserving the same signed direct Cloudinary upload architecture, the same shared mutation/save flow, and the same lesson-level media management structure already established in Feature 09.
