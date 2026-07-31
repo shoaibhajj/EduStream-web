@@ -7,47 +7,22 @@ const adapter = new PrismaNeon({
 
 const prisma = new PrismaClient({ adapter });
 
+
+
 async function main() {
-  const year = await prisma.academicYear.upsert({
-    where: { id: "foundation-year-2025" },
+  // Upsert the single global payment config — safe to re-run
+  await prisma.paymentConfig.upsert({
+    where: { id: "global-payment-config" },
     update: {},
     create: {
-      id: "foundation-year-2025",
-      nameAr: "الصف التأسيسي",
-      nameEn: "Foundation Year",
-      sortOrder: 1,
-      isActive: true,
+      id: "global-payment-config",
+      instructionsAr:
+        "يرجى تحويل المبلغ عبر الوسيلة المناسبة وإرسال إثبات الدفع.",
+      shamCashInstructionsAr:
+        "امسح رمز QR عبر تطبيق شام كاش وأرسل إثبات الدفع عبر واتساب.",
     },
   });
-
-  const subject = await prisma.subject.upsert({
-    where: { id: "foundation-math" },
-    update: {},
-    create: {
-      id: "foundation-math",
-      academicYearId: year.id,
-      nameAr: "الرياضيات",
-      nameEn: "Mathematics",
-      sortOrder: 1,
-      isActive: true,
-    },
-  });
-
-  await prisma.course.upsert({
-    where: { id: "foundation-math-course-01" },
-    update: {},
-    create: {
-      id: "foundation-math-course-01",
-      subjectId: subject.id,
-      nameAr: "الرياضيات الأساسية",
-      nameEn: "Core Mathematics",
-      descriptionAr: "كورس شامل في أساسيات الرياضيات للمرحلة التأسيسية.",
-      descriptionEn:
-        "A comprehensive course covering core mathematics for the foundation year.",
-      isPublished: true,
-      sortOrder: 1,
-    },
-  });
+  console.log("Seeded global payment config");
 }
 
 main()

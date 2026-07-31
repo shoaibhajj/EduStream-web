@@ -31,8 +31,9 @@ model Profile {
   displayName String?  @map("display_name")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
-
+hasActiveSubscription Boolean @default(false) @map("has_active_subscription")
   enrollments Enrollment[]
+  paymentRequests PaymentRequest[]
 
   @@map("profiles")
 }
@@ -87,6 +88,7 @@ model Course {
 
   @@index([subjectId])
     @@index([teacherId]) 
+    paymentRequests PaymentRequest[]
   @@map("courses")
 }
 
@@ -151,4 +153,86 @@ model Enrollment {
   @@index([profileId])
   @@index([courseId])
   @@map("enrollments")
+}
+
+// ── Feature 10: Payment & Request ───────────────────────────────────────────
+
+enum PaymentRequestStatus {
+  pending
+  approved
+  rejected
+}
+
+enum PaymentRequestType {
+  course
+  subscription
+}
+
+/// One global row — admin-managed. Create exactly one via seed or admin UI.
+model PaymentConfig {
+  id                         String   @id @default(cuid())
+
+  // Global bank/transfer info (Arabic primary)
+  instructionsAr             String?  @map("instructions_ar")
+  instructionsEn             String?  @map("instructions_en")
+
+  // Sham Cash block
+  shamCashQrImageUrl         String?  @map("sham_cash_qr_image_url")
+  shamCashWhatsappNumber     String?  @map("sham_cash_whatsapp_number")
+  shamCashInstructionsAr     String?  @map("sham_cash_instructions_ar")
+  shamCashInstructionsEn     String?  @map("sham_cash_instructions_en")
+
+
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt     @map("updated_at")
+
+  @@map("payment_configs")
+}
+
+/// Per-teacher optional payment details managed by admin.
+model TeacherPaymentDetail {
+  id             String  @id @default(cuid())
+  teacherClerkId String  @unique @map("teacher_clerk_id") // Clerk user ID
+
+  detailsAr      String? @map("details_ar")
+  detailsEn      String? @map("details_en")
+  whatsappNumber String? @map("whatsapp_number")
+  qrImageUrl          String? @map("qr_image_url")
+  isVisibleToStudents Boolean @default(false) @map("is_visible_to_students")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt     @map("updated_at")
+
+  @@map("teacher_payment_details")
+}
+
+/// One row per student payment/enrollment request.
+model PaymentRequest {
+  id          String               @id @default(cuid())
+  profileId   String               @map("profile_id")
+  status      PaymentRequestStatus @default(pending)
+  requestType PaymentRequestType   @map("request_type")
+
+  // Null when requestType = subscription
+  courseId    String?              @map("course_id")
+
+  // Student-provided
+  phoneNumber     String  @map("phone_number")
+  paymentReference String @map("payment_reference") // proof text / transfer ref
+
+  // Admin review
+  adminNote   String?  @map("admin_note")
+  reviewedAt  DateTime? @map("reviewed_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt     @map("updated_at")
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  course  Course? @relation(fields: [courseId], references: [id], onDelete: SetNull)
+
+  @@index([profileId])
+  @@index([courseId])
+  @@index([status])
+  @@map("payment_requests")
 }

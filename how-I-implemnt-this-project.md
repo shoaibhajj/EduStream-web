@@ -6620,3 +6620,1197 @@ npm run build
 Feature 09 now has a more production-ready teacher upload experience.
 
 The teacher no longer sees only a generic spinner while a large video uploads. The UI now gives truthful feedback for long uploads while preserving the same signed direct Cloudinary upload architecture, the same shared mutation/save flow, and the same lesson-level media management structure already established in Feature 09.
+
+
+
+
+------
+
+
+
+TITLE Moallem Academy Web Implementation Log - Feature 10 Manual Payment and Access Confirmation Web Flows - Goal...
+
+Build the real Feature 10 manual payment and access-confirmation flow for Moallem Academy so the web app can support:
+- admin-managed global payment instructions
+- teacher-managed personal payment details
+- admin-controlled visibility of teacher payment details to students
+- student submission of manual payment requests
+- admin approval/rejection of payment requests
+- truthful access-state updates after admin review
+
+This feature is about real manual payment workflow scaffolding and truthful access confirmation, not payment gateway integration and not fake UI-only status toggles.
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Feature 10 Manual Payment and Access Confirmation Web Flows - Decisions used for this feature...
+
+- Global payment instructions are a singleton admin-managed configuration.
+- Teacher-specific payment details are stored separately from the global payment config.
+- Teachers can edit their own payment details, but cannot control whether those details are visible to students.
+- Admin controls teacher-detail visibility through a backend field on the teacher payment record.
+- Student requests support two truthful cases:
+  - one-course payment request
+  - all-platform subscription payment request
+- Approval and rejection must update real backend access state, not only the request status label.
+- Business logic lives in shared server-side layers:
+  - `lib/queries/payment.ts`
+  - `lib/mutations/payment.ts`
+- Web-triggered mutations use thin wrappers in:
+  - `actions/payment.ts`
+- Mobile or external consumers can later use matching HTTP endpoints under:
+  - `app/api/payment/*`
+- Visible strings stay localized in `messages/ar.json` and `messages/en.json`.
+- Since full product-grade role assignment is deferred to Feature 11, local verification may still temporarily use direct Prisma Studio edits to `Profile.role`.
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 1 Extend the Prisma schema for manual payment flows - File to update...
+
+- `prisma/schema.prisma`
+
+TITLE Moallem Academy Web Implementation Log - Step 1 Extend the Prisma schema for manual payment flows - Why this matters...
+
+Feature 06 already introduced `EnrollmentStatus`, but the actual manual payment and admin-confirmation workflow was intentionally deferred to Feature 10. This feature needed real payment-related models plus one minimal subscription-access field on the profile model.
+
+TITLE Moallem Academy Web Implementation Log - Step 1 Extend the Prisma schema for manual payment flows - Code...
+
+```prisma
+enum PaymentRequestStatus {
+  pending
+  approved
+  rejected
+}
+
+enum PaymentRequestType {
+  course
+  subscription
+}
+
+model PaymentConfig {
+  id                       String   @id
+  instructionsAr           String?  @map("instructions_ar")
+  instructionsEn           String?  @map("instructions_en")
+  shamCashQrImageUrl       String?  @map("sham_cash_qr_image_url")
+  shamCashWhatsappNumber   String?  @map("sham_cash_whatsapp_number")
+  shamCashInstructionsAr   String?  @map("sham_cash_instructions_ar")
+  shamCashInstructionsEn   String?  @map("sham_cash_instructions_en")
+  createdAt                DateTime @default(now()) @map("created_at")
+  updatedAt                DateTime @updatedAt @map("updated_at")
+
+  @@map("payment_configs")
+}
+
+model TeacherPaymentDetail {
+  id                  String   @id @default(cuid())
+  teacherClerkId      String   @unique @map("teacher_clerk_id")
+  detailsAr           String?  @map("details_ar")
+  detailsEn           String?  @map("details_en")
+  whatsappNumber      String?  @map("whatsapp_number")
+  qrImageUrl          String?  @map("qr_image_url")
+  isVisibleToStudents Boolean  @default(false) @map("is_visible_to_students")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  @@map("teacher_payment_details")
+}
+
+model PaymentRequest {
+  id               String               @id @default(cuid())
+  profileId        String               @map("profile_id")
+  courseId         String?              @map("course_id")
+  requestType      PaymentRequestType   @default(course) @map("request_type")
+  status           PaymentRequestStatus @default(pending)
+  phoneNumber      String?              @map("phone_number")
+  paymentReference String?              @map("payment_reference")
+  adminNote        String?              @map("admin_note")
+  reviewedAt       DateTime?            @map("reviewed_at")
+  createdAt        DateTime             @default(now()) @map("created_at")
+  updatedAt        DateTime             @updatedAt @map("updated_at")
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  course  Course? @relation(fields: [courseId], references: [id], onDelete: SetNull)
+
+  @@index([profileId])
+  @@index([courseId])
+  @@index([status])
+  @@map("payment_requests")
+}
+```
+
+Also extend `Profile` with:
+
+```prisma
+hasActiveSubscription Boolean @default(false) @map("has_active_subscription")
+paymentRequests       PaymentRequest[]
+```
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 2 Add the migration, generate Prisma client, and seed singleton payment config - Commands used...
+
+```bash
+npx prisma migrate dev --name add_manual_payment_flows
+npx prisma generate
+npx prisma db seed
+```
+
+TITLE Moallem Academy Web Implementation Log - Step 2 Add the migration, generate Prisma client, and seed singleton payment config - Why this matters...
+
+The payment flow depends on the schema being real in the database, and the app also benefits from having the singleton payment-config row available from the start instead of assuming it already exists.
+
+TITLE Moallem Academy Web Implementation Log - Step 2 Add the migration, generate Prisma client, and seed singleton payment config - Seed pattern used...
+
+In `prisma/seed.ts`, ensure a singleton row exists:
+
+```ts
+await prisma.paymentConfig.upsert({
+  where: { id: "global-payment-config" },
+  update: {},
+  create: {
+    id: "global-payment-config",
+  },
+});
+```
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 3 Create the shared payment read layer - File to create...
+
+- `lib/queries/payment.ts`
+
+TITLE Moallem Academy Web Implementation Log - Step 3 Create the shared payment read layer - Why this matters...
+
+All read-only payment data should be reusable from Server Components now and from Route Handlers later, without duplicating Prisma queries across web and mobile/external consumers.
+
+TITLE Moallem Academy Web Implementation Log - Step 3 Create the shared payment read layer - Code...
+
+```ts
+import "server-only";
+import { prisma } from "@/lib/prisma";
+
+export async function getGlobalPaymentConfig() {
+  return prisma.paymentConfig.findUnique({
+    where: { id: "global-payment-config" },
+  });
+}
+
+export async function getVisibleTeacherPaymentDetail(teacherClerkId: string) {
+  return prisma.teacherPaymentDetail.findFirst({
+    where: {
+      teacherClerkId,
+      isVisibleToStudents: true,
+    },
+  });
+}
+
+export async function getMyTeacherPaymentDetail(teacherClerkId: string) {
+  return prisma.teacherPaymentDetail.findUnique({
+    where: { teacherClerkId },
+  });
+}
+
+export async function getAllTeacherPaymentDetails() {
+  return prisma.teacherPaymentDetail.findMany({
+    orderBy: { updatedAt: "desc" },
+  });
+}
+
+export async function getAllPaymentRequests() {
+  return prisma.paymentRequest.findMany({
+    include: {
+      profile: true,
+      course: true,
+    },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
+export async function getMyPaymentRequests(profileId: string) {
+  return prisma.paymentRequest.findMany({
+    where: { profileId },
+    include: { course: true },
+    orderBy: { createdAt: "desc" },
+  });
+}
+```
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 4 Create the shared payment mutation layer - File to create...
+
+- `lib/mutations/payment.ts`
+
+TITLE Moallem Academy Web Implementation Log - Step 4 Create the shared payment mutation layer - Why this matters...
+
+This feature contains the real business logic:
+- create/update global config
+- upsert teacher payment details
+- create payment requests
+- approve/reject requests
+- update enrollment/subscription access state
+
+That logic should exist once in framework-agnostic server code, not inside pages or client components.
+
+TITLE Moallem Academy Web Implementation Log - Step 4 Create the shared payment mutation layer - Core code structure used...
+
+```ts
+import { prisma } from "@/lib/prisma";
+
+const PAYMENT_CONFIG_ID = "global-payment-config";
+
+export async function updatePaymentConfig(data: {
+  instructionsAr?: string;
+  instructionsEn?: string;
+  shamCashQrImageUrl?: string;
+  shamCashWhatsappNumber?: string;
+  shamCashInstructionsAr?: string;
+  shamCashInstructionsEn?: string;
+}) {
+  return prisma.paymentConfig.upsert({
+    where: { id: PAYMENT_CONFIG_ID },
+    update: data,
+    create: {
+      id: PAYMENT_CONFIG_ID,
+      ...data,
+    },
+  });
+}
+
+export async function upsertMyTeacherPaymentDetail(data: {
+  teacherClerkId: string;
+  detailsAr?: string;
+  detailsEn?: string;
+  whatsappNumber?: string;
+  qrImageUrl?: string;
+}) {
+  return prisma.teacherPaymentDetail.upsert({
+    where: { teacherClerkId: data.teacherClerkId },
+    update: {
+      detailsAr: data.detailsAr,
+      detailsEn: data.detailsEn,
+      whatsappNumber: data.whatsappNumber,
+      qrImageUrl: data.qrImageUrl,
+    },
+    create: {
+      teacherClerkId: data.teacherClerkId,
+      detailsAr: data.detailsAr,
+      detailsEn: data.detailsEn,
+      whatsappNumber: data.whatsappNumber,
+      qrImageUrl: data.qrImageUrl,
+    },
+  });
+}
+
+export async function setTeacherPaymentVisibility(data: {
+  teacherClerkId: string;
+  visible: boolean;
+}) {
+  return prisma.teacherPaymentDetail.update({
+    where: { teacherClerkId: data.teacherClerkId },
+    data: { isVisibleToStudents: data.visible },
+  });
+}
+
+export async function createPaymentRequest(data: {
+  profileId: string;
+  courseId?: string | null;
+  requestType: "course" | "subscription";
+  phoneNumber?: string;
+  paymentReference?: string;
+}) {
+  return prisma.paymentRequest.create({
+    data: {
+      profileId: data.profileId,
+      courseId: data.courseId ?? null,
+      requestType: data.requestType,
+      phoneNumber: data.phoneNumber,
+      paymentReference: data.paymentReference,
+      status: "pending",
+    },
+  });
+}
+```
+
+TITLE Moallem Academy Web Implementation Log - Step 4 Create the shared payment mutation layer - Approval and rejection logic used...
+
+Approval/rejection was implemented as truthful backend state transitions, not just request-label changes.
+
+```ts
+export async function approvePaymentRequest(paymentRequestId: string) {
+  return prisma.$transaction(async (tx) => {
+    const request = await tx.paymentRequest.findUnique({
+      where: { id: paymentRequestId },
+    });
+
+    if (!request) {
+      throw new Error("Payment request not found");
+    }
+
+    if (request.requestType === "subscription") {
+      await tx.profile.update({
+        where: { id: request.profileId },
+        data: { hasActiveSubscription: true },
+      });
+    }
+
+    if (request.requestType === "course" && request.courseId) {
+      const existingEnrollment = await tx.enrollment.findFirst({
+        where: {
+          profileId: request.profileId,
+          courseId: request.courseId,
+        },
+      });
+
+      if (existingEnrollment) {
+        await tx.enrollment.update({
+          where: { id: existingEnrollment.id },
+          data: { status: "confirmed" },
+        });
+      } else {
+        await tx.enrollment.create({
+          data: {
+            profileId: request.profileId,
+            courseId: request.courseId,
+            status: "confirmed",
+          },
+        });
+      }
+    }
+
+    return tx.paymentRequest.update({
+      where: { id: paymentRequestId },
+      data: {
+        status: "approved",
+        reviewedAt: new Date(),
+      },
+    });
+  });
+}
+
+export async function rejectPaymentRequest(paymentRequestId: string) {
+  return prisma.$transaction(async (tx) => {
+    const request = await tx.paymentRequest.findUnique({
+      where: { id: paymentRequestId },
+    });
+
+    if (!request) {
+      throw new Error("Payment request not found");
+    }
+
+    if (request.requestType === "course" && request.courseId) {
+      const existingEnrollment = await tx.enrollment.findFirst({
+        where: {
+          profileId: request.profileId,
+          courseId: request.courseId,
+        },
+      });
+
+      if (existingEnrollment) {
+        await tx.enrollment.update({
+          where: { id: existingEnrollment.id },
+          data: { status: "rejected" },
+        });
+      } else {
+        await tx.enrollment.create({
+          data: {
+            profileId: request.profileId,
+            courseId: request.courseId,
+            status: "rejected",
+          },
+        });
+      }
+    }
+
+    return tx.paymentRequest.update({
+      where: { id: paymentRequestId },
+      data: {
+        status: "rejected",
+        reviewedAt: new Date(),
+      },
+    });
+  });
+}
+```
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 5 Add thin Server Action wrappers for web-triggered payment mutations - File to create...
+
+- `actions/payment.ts`
+
+TITLE Moallem Academy Web Implementation Log - Step 5 Add thin Server Action wrappers for web-triggered payment mutations - Why this matters...
+
+Client Components should not import Prisma or business logic directly. Web forms and buttons call small Server Actions that delegate to `lib/mutations/payment.ts` and then revalidate the relevant pages.
+
+TITLE Moallem Academy Web Implementation Log - Step 5 Add thin Server Action wrappers for web-triggered payment mutations - Code pattern used...
+
+```ts
+"use server";
+
+import { revalidatePath } from "next/cache";
+import {
+  updatePaymentConfig,
+  upsertMyTeacherPaymentDetail,
+  setTeacherPaymentVisibility,
+  createPaymentRequest,
+  approvePaymentRequest,
+  rejectPaymentRequest,
+} from "@/lib/mutations/payment";
+
+export async function updatePaymentConfigAction(input: {
+  instructionsAr?: string;
+  instructionsEn?: string;
+  shamCashQrImageUrl?: string;
+  shamCashWhatsappNumber?: string;
+  shamCashInstructionsAr?: string;
+  shamCashInstructionsEn?: string;
+}) {
+  await updatePaymentConfig(input);
+  revalidatePath("/admin/payment");
+  revalidatePath("/payment");
+}
+
+export async function upsertMyTeacherPaymentDetailAction(input: {
+  teacherClerkId: string;
+  detailsAr?: string;
+  detailsEn?: string;
+  whatsappNumber?: string;
+  qrImageUrl?: string;
+}) {
+  await upsertMyTeacherPaymentDetail(input);
+  revalidatePath("/teacher/payment");
+  revalidatePath("/admin/payment/teachers");
+  revalidatePath("/payment");
+}
+
+export async function setTeacherPaymentVisibilityAction(input: {
+  teacherClerkId: string;
+  visible: boolean;
+}) {
+  await setTeacherPaymentVisibility(input);
+  revalidatePath("/admin/payment/teachers");
+  revalidatePath("/payment");
+}
+
+export async function createPaymentRequestAction(input: {
+  profileId: string;
+  courseId?: string | null;
+  requestType: "course" | "subscription";
+  phoneNumber?: string;
+  paymentReference?: string;
+}) {
+  await createPaymentRequest(input);
+  revalidatePath("/payment/request");
+  revalidatePath("/admin/payment/requests");
+}
+
+export async function approvePaymentRequestAction(paymentRequestId: string) {
+  await approvePaymentRequest(paymentRequestId);
+  revalidatePath("/admin/payment/requests");
+}
+
+export async function rejectPaymentRequestAction(paymentRequestId: string) {
+  await rejectPaymentRequest(paymentRequestId);
+  revalidatePath("/admin/payment/requests");
+}
+```
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 6 Add mobile/future-consumer Route Handlers for payment flow parity - Files to create...
+
+- `app/api/payment/config/route.ts`
+- `app/api/payment/requests/route.ts`
+- `app/api/payment/requests/[requestId]/approve/route.ts`
+- `app/api/payment/requests/[requestId]/reject/route.ts`
+
+TITLE Moallem Academy Web Implementation Log - Step 6 Add mobile/future-consumer Route Handlers for payment flow parity - Why this matters...
+
+Server Actions are web-only. The project architecture requires mobile/external HTTP consumers to reach shared logic through Route Handlers that delegate into the same `lib/queries/*` and `lib/mutations/*` layers.
+
+TITLE Moallem Academy Web Implementation Log - Step 6 Add mobile/future-consumer Route Handlers for payment flow parity - Example pattern used...
+
+```ts
+import { NextResponse } from "next/server";
+import { getGlobalPaymentConfig } from "@/lib/queries/payment";
+
+export async function GET() {
+  const config = await getGlobalPaymentConfig();
+  return NextResponse.json({ config });
+}
+```
+
+And for approval:
+
+```ts
+import { NextResponse } from "next/server";
+import { approvePaymentRequest } from "@/lib/mutations/payment";
+
+export async function POST(
+  _request: Request,
+  { params }: { params: Promise<{ requestId: string }> }
+) {
+  const { requestId } = await params;
+  const result = await approvePaymentRequest(requestId);
+  return NextResponse.json({ request: result });
+}
+```
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 7 Build the admin global payment config page and form - Files to create...
+
+- `app/[locale]/(admin)/admin/payment/page.tsx`
+- `app/[locale]/(admin)/admin/payment/PaymentConfigForm.tsx`
+
+TITLE Moallem Academy Web Implementation Log - Step 7 Build the admin global payment config page and form - Why this matters...
+
+The product needs one admin-managed source for global payment instructions that students can always see, separate from teacher-specific payment methods.
+
+TITLE Moallem Academy Web Implementation Log - Step 7 Build the admin global payment config page and form - Page code structure used...
+
+```tsx
+import { getTranslations } from "next-intl/server";
+import { getGlobalPaymentConfig } from "@/lib/queries/payment";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeader } from "@/components/shared/PageHeader";
+import { PaymentConfigForm } from "./PaymentConfigForm";
+
+export default async function AdminPaymentPage() {
+  const t = await getTranslations("Payment");
+  const config = await getGlobalPaymentConfig();
+
+  return (
+    <div className="space-y-6 p-6">
+      <PageHeader title={t("adminConfig")} />
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("adminConfig")}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <PaymentConfigForm config={config} />
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+```
+
+TITLE Moallem Academy Web Implementation Log - Step 7 Build the admin global payment config page and form - Form code used...
+
+```tsx
+"use client";
+
+import { useTranslations } from "next-intl";
+import { useState, useTransition } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { updatePaymentConfigAction } from "@/actions/payment";
+import type { PaymentConfig } from "@/lib/generated/prisma";
+
+interface Props {
+  config: PaymentConfig | null;
+}
+
+export function PaymentConfigForm({ config }: Props) {
+  const t = useTranslations("Payment");
+  const [isPending, startTransition] = useTransition();
+  const [saved, setSaved] = useState(false);
+
+  const [instructionsAr, setInstructionsAr] = useState(config?.instructionsAr ?? "");
+  const [instructionsEn, setInstructionsEn] = useState(config?.instructionsEn ?? "");
+  const [qrUrl, setQrUrl] = useState(config?.shamCashQrImageUrl ?? "");
+  const [whatsapp, setWhatsapp] = useState(config?.shamCashWhatsappNumber ?? "");
+  const [shamAr, setShamAr] = useState(config?.shamCashInstructionsAr ?? "");
+  const [shamEn, setShamEn] = useState(config?.shamCashInstructionsEn ?? "");
+
+  function handleSaveConfig() {
+    startTransition(async () => {
+      await updatePaymentConfigAction({
+        instructionsAr,
+        instructionsEn,
+        shamCashQrImageUrl: qrUrl,
+        shamCashWhatsappNumber: whatsapp,
+        shamCashInstructionsAr: shamAr,
+        shamCashInstructionsEn: shamEn,
+      });
+      setSaved(true);
+    });
+  }
+
+  return (
+    <div className="grid gap-4">
+      <div>
+        <Label>{t("instructionsAr")}</Label>
+        <Textarea value={instructionsAr} onChange={(e) => setInstructionsAr(e.target.value)} dir="rtl" />
+      </div>
+      <div>
+        <Label>{t("instructionsEn")}</Label>
+        <Textarea value={instructionsEn} onChange={(e) => setInstructionsEn(e.target.value)} dir="ltr" />
+      </div>
+      <div>
+        <Label>{t("qrImageUrl")}</Label>
+        <Input value={qrUrl} onChange={(e) => setQrUrl(e.target.value)} placeholder="https://..." dir="ltr" />
+      </div>
+      <div>
+        <Label>{t("whatsappNumber")}</Label>
+        <Input value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} placeholder="+963..." dir="ltr" />
+      </div>
+      <div>
+        <Label>{t("shamCashInstructionsAr")}</Label>
+        <Textarea value={shamAr} onChange={(e) => setShamAr(e.target.value)} dir="rtl" />
+      </div>
+      <div>
+        <Label>{t("shamCashInstructionsEn")}</Label>
+        <Textarea value={shamEn} onChange={(e) => setShamEn(e.target.value)} dir="ltr" />
+      </div>
+
+      <Button onClick={handleSaveConfig} disabled={isPending}>
+        {t("adminSaveConfig")}
+      </Button>
+
+      {saved ? <p className="text-sm text-success">{t("requestSubmitted")}</p> : null}
+    </div>
+  );
+}
+```
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 8 Build the teacher self-service payment details page - Files to create...
+
+- `app/[locale]/(teacher)/teacher/payment/page.tsx`
+- `app/[locale]/(teacher)/teacher/payment/TeacherPaymentForm.tsx`
+
+TITLE Moallem Academy Web Implementation Log - Step 8 Build the teacher self-service payment details page - Why this matters...
+
+Teachers need a real page to manage their own payment content, but they must not be able to bypass admin review by controlling visibility themselves.
+
+TITLE Moallem Academy Web Implementation Log - Step 8 Build the teacher self-service payment details page - Form code used...
+
+```tsx
+"use client";
+
+import { useTranslations } from "next-intl";
+import { useState, useTransition } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { upsertMyTeacherPaymentDetailAction } from "@/actions/payment";
+import type { TeacherPaymentDetail } from "@/lib/generated/prisma";
+
+interface Props {
+  detail: TeacherPaymentDetail | null;
+  teacherClerkId: string;
+}
+
+export function TeacherPaymentForm({ detail, teacherClerkId }: Props) {
+  const t = useTranslations("Payment");
+  const [isPending, startTransition] = useTransition();
+  const [saved, setSaved] = useState(false);
+
+  const [detailsAr, setDetailsAr] = useState(detail?.detailsAr ?? "");
+  const [detailsEn, setDetailsEn] = useState(detail?.detailsEn ?? "");
+  const [whatsappNumber, setWhatsappNumber] = useState(detail?.whatsappNumber ?? "");
+  const [qrImageUrl, setQrImageUrl] = useState(detail?.qrImageUrl ?? "");
+
+  function handleSave() {
+    startTransition(async () => {
+      await upsertMyTeacherPaymentDetailAction({
+        teacherClerkId,
+        detailsAr,
+        detailsEn,
+        whatsappNumber,
+        qrImageUrl,
+      });
+      setSaved(true);
+    });
+  }
+
+  return (
+    <div className="max-w-2xl mx-auto p-6 space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("myPaymentDetails")}</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div>
+            <Label>{t("teacherDetailsAr")}</Label>
+            <Textarea value={detailsAr} onChange={(e) => setDetailsAr(e.target.value)} dir="rtl" />
+          </div>
+
+          <div>
+            <Label>{t("teacherDetailsEn")}</Label>
+            <Textarea value={detailsEn} onChange={(e) => setDetailsEn(e.target.value)} dir="ltr" />
+          </div>
+
+          <div>
+            <Label>{t("whatsappNumber")}</Label>
+            <Input
+              value={whatsappNumber}
+              onChange={(e) => setWhatsappNumber(e.target.value)}
+              placeholder="+963..."
+              dir="ltr"
+            />
+          </div>
+
+          <div>
+            <Label>{t("qrImageUrl")}</Label>
+            <Input
+              value={qrImageUrl}
+              onChange={(e) => setQrImageUrl(e.target.value)}
+              placeholder="https://..."
+              dir="ltr"
+            />
+          </div>
+
+          <Button onClick={handleSave} disabled={isPending}>
+            {t("saveMyDetails")}
+          </Button>
+
+          {saved ? <p className="text-sm text-success">{t("requestSubmitted")}</p> : null}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+```
+
+TITLE Moallem Academy Web Implementation Log - Step 8 Build the teacher self-service payment details page - Important rule used...
+
+No visibility switch was included in the teacher form. Visibility belongs only to admin review through `TeacherPaymentDetail.isVisibleToStudents`.
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 9 Build the admin teacher-payment visibility review page - Files to create...
+
+- `app/[locale]/(admin)/admin/payment/teachers/page.tsx`
+- `app/[locale]/(admin)/admin/payment/teachers/TeacherVisibilityRow.tsx`
+
+TITLE Moallem Academy Web Implementation Log - Step 9 Build the admin teacher-payment visibility review page - Why this matters...
+
+Admins need a real review surface for teacher-submitted payment details, but the product rule is that they review teacher content and control visibility rather than directly editing teacher text.
+
+TITLE Moallem Academy Web Implementation Log - Step 9 Build the admin teacher-payment visibility review page - Code used...
+
+```tsx
+"use client";
+
+import { useTranslations } from "next-intl";
+import { useState, useTransition } from "react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+import { setTeacherPaymentVisibilityAction } from "@/actions/payment";
+
+interface TeacherWithDetail {
+  clerkUserId: string;
+  displayName: string | null;
+  paymentDetail: {
+    detailsAr: string | null;
+    detailsEn: string | null;
+    whatsappNumber: string | null;
+    qrImageUrl: string | null;
+    isVisibleToStudents: boolean;
+  } | null;
+}
+
+export function TeacherVisibilityRow({ teacher }: { teacher: TeacherWithDetail }) {
+  const t = useTranslations("Payment");
+  const [isPending, startTransition] = useTransition();
+  const [visible, setVisible] = useState(
+    teacher.paymentDetail?.isVisibleToStudents ?? false
+  );
+
+  const hasDetail = Boolean(teacher.paymentDetail);
+
+  function handleToggle(next: boolean) {
+    setVisible(next);
+    startTransition(async () => {
+      await setTeacherPaymentVisibilityAction({
+        teacherClerkId: teacher.clerkUserId,
+        visible: next,
+      });
+    });
+  }
+
+  return (
+    <Card>
+      <CardContent className="pt-4 space-y-3">
+        <div className="flex items-center justify-between gap-4">
+          <p className="font-medium">{teacher.displayName ?? teacher.clerkUserId}</p>
+        </div>
+
+        {hasDetail ? (
+          <div className="text-sm text-text-secondary space-y-1">
+            {teacher.paymentDetail?.detailsAr ? (
+              <p dir="rtl">{teacher.paymentDetail.detailsAr}</p>
+            ) : null}
+            {teacher.paymentDetail?.whatsappNumber ? (
+              <p>
+                {t("whatsappNumber")}: {teacher.paymentDetail.whatsappNumber}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
+        {hasDetail ? (
+          <div className="flex items-center gap-3">
+            <Switch checked={visible} onCheckedChange={handleToggle} disabled={isPending} />
+            <Label>{t("visibleToStudents")}</Label>
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+```
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 10 Build the student payment instructions page - Files to create...
+
+- `app/[locale]/(student)/payment/page.tsx`
+- supporting student-facing payment display components if needed
+
+TITLE Moallem Academy Web Implementation Log - Step 10 Build the student payment instructions page - Why this matters...
+
+Students need one localized place to see:
+- the admin-managed global payment guidance
+- optionally a teacher-specific payment block, but only if admin made that teacher visible
+
+TITLE Moallem Academy Web Implementation Log - Step 10 Build the student payment instructions page - Pattern used...
+
+The page loads:
+- `getGlobalPaymentConfig()`
+- `getVisibleTeacherPaymentDetail(teacherClerkId)` when relevant
+
+And renders:
+- global instructions always
+- teacher-specific instructions only when the returned visible record exists
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 11 Build the student manual payment request form - Files to create...
+
+- `app/[locale]/(student)/payment/request/page.tsx`
+- `app/[locale]/(student)/payment/request/PaymentRequestForm.tsx`
+
+TITLE Moallem Academy Web Implementation Log - Step 11 Build the student manual payment request form - Why this matters...
+
+Feature 06 showed pending/confirmed/rejected enrollment states, but there was still no real mutation path for a student to submit a manual payment request. This feature adds that truthful submission flow.
+
+TITLE Moallem Academy Web Implementation Log - Step 11 Build the student manual payment request form - Code pattern used...
+
+```tsx
+"use client";
+
+import { useState, useTransition } from "react";
+import { useTranslations } from "next-intl";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { createPaymentRequestAction } from "@/actions/payment";
+
+interface Props {
+  profileId: string;
+  defaultCourseId?: string | null;
+}
+
+export function PaymentRequestForm({ profileId, defaultCourseId }: Props) {
+  const t = useTranslations("Payment");
+  const [isPending, startTransition] = useTransition();
+  const [requestType, setRequestType] = useState<"course" | "subscription">("course");
+  const [courseId, setCourseId] = useState(defaultCourseId ?? "");
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [paymentReference, setPaymentReference] = useState("");
+  const [saved, setSaved] = useState(false);
+
+  function handleSubmit() {
+    startTransition(async () => {
+      await createPaymentRequestAction({
+        profileId,
+        courseId: requestType === "course" ? courseId : null,
+        requestType,
+        phoneNumber,
+        paymentReference,
+      });
+      setSaved(true);
+    });
+  }
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <Label>{t("whatsappNumber")}</Label>
+        <Input value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} dir="ltr" />
+      </div>
+
+      <div>
+        <Label>{t("paymentReference")}</Label>
+        <Textarea value={paymentReference} onChange={(e) => setPaymentReference(e.target.value)} />
+      </div>
+
+      <Button onClick={handleSubmit} disabled={isPending}>
+        {t("submitPaymentRequest")}
+      </Button>
+
+      {saved ? <p className="text-sm text-success">{t("requestSubmitted")}</p> : null}
+    </div>
+  );
+}
+```
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 12 Build the admin payment request review list - Files to create...
+
+- `app/[locale]/(admin)/admin/payment/requests/page.tsx`
+- `app/[locale]/(admin)/admin/payment/requests/PaymentRequestRow.tsx`
+
+TITLE Moallem Academy Web Implementation Log - Step 12 Build the admin payment request review list - Why this matters...
+
+The manual payment flow is incomplete unless admins can see submitted requests and perform real approve/reject actions from the web app.
+
+TITLE Moallem Academy Web Implementation Log - Step 12 Build the admin payment request review list - Code pattern used...
+
+```tsx
+"use client";
+
+import { useTransition } from "react";
+import { useTranslations } from "next-intl";
+import { Button } from "@/components/ui/button";
+import {
+  approvePaymentRequestAction,
+  rejectPaymentRequestAction,
+} from "@/actions/payment";
+
+export function PaymentRequestRow({
+  request,
+}: {
+  request: {
+    id: string;
+    status: string;
+    phoneNumber: string | null;
+    paymentReference: string | null;
+  };
+}) {
+  const t = useTranslations("Payment");
+  const [isPending, startTransition] = useTransition();
+
+  function handleApprove() {
+    startTransition(async () => {
+      await approvePaymentRequestAction(request.id);
+    });
+  }
+
+  function handleReject() {
+    startTransition(async () => {
+      await rejectPaymentRequestAction(request.id);
+    });
+  }
+
+  return (
+    <div className="rounded-xl border border-border p-4 space-y-3">
+      <p>{request.phoneNumber}</p>
+      <p>{request.paymentReference}</p>
+      <p>{request.status}</p>
+
+      <div className="flex gap-2">
+        <Button onClick={handleApprove} disabled={isPending}>
+          {t("approve")}
+        </Button>
+        <Button variant="outline" onClick={handleReject} disabled={isPending}>
+          {t("reject")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 13 Add the localization strings for payment flow - Files to update...
+
+- `messages/ar.json`
+- `messages/en.json`
+
+TITLE Moallem Academy Web Implementation Log - Step 13 Add the localization strings for payment flow - Why this matters...
+
+Feature 10 introduced multiple new admin, teacher, and student surfaces. All visible strings must remain localized and Arabic-first, with English parity preserved.
+
+TITLE Moallem Academy Web Implementation Log - Step 13 Add the localization strings for payment flow - Example keys used...
+
+```json
+"Payment": {
+  "adminConfig": "إعدادات الدفع",
+  "adminSaveConfig": "حفظ الإعدادات",
+  "instructionsAr": "التعليمات بالعربية",
+  "instructionsEn": "التعليمات بالإنجليزية",
+  "shamCashInstructionsAr": "تعليمات شام كاش بالعربية",
+  "shamCashInstructionsEn": "Sham Cash instructions in English",
+  "qrImageUrl": "رابط صورة QR",
+  "whatsappNumber": "رقم واتساب",
+  "teacherDetailsAr": "تفاصيل دفع المعلم بالعربية",
+  "teacherDetailsEn": "Teacher payment details in English",
+  "teacherPaymentList": "طلبات دفع المعلمين",
+  "visibleToStudents": "ظاهر للطلاب",
+  "myPaymentDetails": "معلومات الدفع الخاصة بي",
+  "saveMyDetails": "حفظ معلوماتي",
+  "paymentReference": "مرجع الدفع",
+  "submitPaymentRequest": "إرسال طلب الدفع",
+  "requestSubmitted": "تم إرسال الطلب بنجاح",
+  "approve": "قبول",
+  "reject": "رفض"
+}
+```
+
+And in English:
+
+```json
+"Payment": {
+  "teacherPaymentList": "Teacher Payment Requests",
+  "visibleToStudents": "Visible to students",
+  "myPaymentDetails": "My payment details",
+  "saveMyDetails": "Save my details"
+}
+```
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 14 Handle the Prisma schema/database drift issue discovered during implementation - Problem encountered...
+
+After the payment schema refactor, opening:
+
+- `/ar/admin/payment`
+
+triggered a Prisma runtime error similar to:
+
+```txt
+Invalid `prisma.paymentConfig.findUnique()` invocation:
+The column `(not available)` does not exist in the current database.
+```
+
+TITLE Moallem Academy Web Implementation Log - Step 14 Handle the Prisma schema/database drift issue discovered during implementation - Why this happened...
+
+A payment-related schema change was reflected in code and generated Prisma Client, but the local database state was not fully synced to the final schema shape yet.
+
+TITLE Moallem Academy Web Implementation Log - Step 14 Handle the Prisma schema/database drift issue discovered during implementation - Recovery commands used...
+
+```bash
+npx prisma migrate status
+npx prisma migrate dev --name sync_payment_schema
+npx prisma generate
+npx prisma db seed
+```
+
+If local development drift still remained, the dev-only reset path was accepted:
+
+```bash
+npx prisma migrate reset
+npx prisma generate
+npx prisma db seed
+```
+
+TITLE Moallem Academy Web Implementation Log - Step 14 Handle the Prisma schema/database drift issue discovered during implementation - Why this matters...
+
+Feature 10 changed both schema and runtime reads. Keeping Prisma schema, generated client, and the actual database in sync was necessary before the new payment pages could render reliably.
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 15 Local verification used for this feature - Commands...
+
+```bash
+npx prisma migrate status
+npx prisma generate
+npx prisma db seed
+npx prisma studio
+npx tsc --noEmit
+npm run build
+npm run dev
+```
+
+TITLE Moallem Academy Web Implementation Log - Step 15 Local verification used for this feature - What to verify...
+
+- `payment_configs` exists and contains the singleton global config row
+- `teacher_payment_details` exists and supports:
+  - `teacherClerkId`
+  - `detailsAr`
+  - `detailsEn`
+  - `whatsappNumber`
+  - `qrImageUrl`
+  - `isVisibleToStudents`
+- `payment_requests` exists and supports:
+  - `profileId`
+  - `courseId`
+  - `requestType`
+  - `status`
+  - `phoneNumber`
+  - `paymentReference`
+  - `reviewedAt`
+- `/ar/admin/payment` renders and saves global config successfully
+- `/ar/teacher/payment` renders and saves teacher-specific payment details successfully
+- `/ar/admin/payment/teachers` renders teacher rows and toggles visibility successfully
+- `/ar/payment` shows global payment instructions
+- teacher-specific payment details are only shown to students when `isVisibleToStudents = true`
+- `/ar/payment/request` can create pending payment requests
+- `/ar/admin/payment/requests` can approve and reject requests
+- approving a course request confirms or creates the matching enrollment
+- rejecting a course request preserves a rejected enrollment state
+- approving a subscription request updates `Profile.hasActiveSubscription = true`
+- payment pages remain localized and RTL-safe
+- the feature compiles cleanly with no leftover references to removed payment fields
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 16 Commit the manual payment and access confirmation flow - Command...
+
+```bash
+git add .
+git commit -m "feat10 add manual payment and access confirmation web flows"
+git push origin main
+```
+
+TITLE Moallem Academy Web Implementation Log - Step 16 Commit the manual payment and access confirmation flow - Why this matters...
+
+This saves the first real monetization-adjacent workflow on the web app without overreaching into full gateway billing or overcomplicated role tooling too early.
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Feature 10 completion checklist...
+
+- [x] Prisma schema extended for manual payment and access-confirmation flows
+- [x] Singleton global payment config model added
+- [x] Teacher payment detail model added
+- [x] Payment request model and enums added
+- [x] `Profile.hasActiveSubscription` added as minimal subscription-access field
+- [x] Shared payment reads added under `lib/queries/payment.ts`
+- [x] Shared payment mutations added under `lib/mutations/payment.ts`
+- [x] Thin web-only Server Actions added under `actions/payment.ts`
+- [x] Matching payment Route Handler direction added under `app/api/payment/*`
+- [x] Admin global payment config page added
+- [x] Teacher self-service payment page added
+- [x] Admin teacher-payment visibility review page added
+- [x] Student payment instructions page added
+- [x] Student manual payment-request form added
+- [x] Admin request review list added
+- [x] Approval/rejection updates real access state instead of only request labels
+- [x] Arabic-first localization updated with English parity
+- [x] Prisma drift issue resolved during local implementation
+- [x] Feature verified locally enough to continue, with full product-grade role tooling intentionally deferred
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Notes for future features...
+
+- Feature 11 should formalize admin/staff role management so local Prisma Studio role edits are no longer needed for verification.
+- If subscriptions become more complex later, `Profile.hasActiveSubscription` may need to evolve into a dedicated subscription or entitlement model.
+- If teacher monetization becomes course-specific later, `TeacherPaymentDetail` may need optional per-course overrides.
+- Feature 12 should keep student-facing lesson playback and media protection rules aligned with the access truth established by approved enrollments and subscription flags.
+- Any mobile payment-management path should reuse the same `lib/queries/payment.ts` and `lib/mutations/payment.ts` layers instead of duplicating business logic in separate web/mobile implementations.

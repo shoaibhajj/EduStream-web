@@ -1,10 +1,12 @@
 ## Current Status
 Phase: Phase 2 — Core Product Flows
 Current Goal: Continue deeper product flows on top of the established shared web design-system foundation so future work stays consistent, RTL-safe, localized, and easier to evolve
-Last completed: 09 — Course Media Source System (Cloudinary Upload + External Links)
-Next up: 10 — Manual Payment and Access Confirmation Web Flows
+Last completed: 10 — Manual Payment and Access Confirmation Web Flows
+Next up: 11 — Admin and Staff Management Foundations
+
 
 ## Progress
+
 
 ### Phase 1 — Real Web Foundation
 - [x] 01 — Establish Real Web Foundation
@@ -12,26 +14,31 @@ Next up: 10 — Manual Payment and Access Confirmation Web Flows
 - [x] 03 — Configure Database Foundation (Neon + Prisma)
 - [x] 04 — Establish RTL, Localization, and App Shell Foundation
 
+
 ### Phase 2 — Core Product Flows
 - [x] 05 — Student Browse and Course Discovery Flow
 - [x] 06 — Course Detail, Preview, and Access States
 - [x] 07 — Establish Web Design System and Shared UI Components
 - [x] 08 — Teacher Dashboard and Course Management Flow
 - [x] 09 — Course Media Source System (Cloudinary Upload + External Links)
-- [ ] 10 — Manual Payment and Access Confirmation Web Flows
+- [x] 10 — Manual Payment and Access Confirmation Web Flows
+
 
 ### Phase 3 — Shared Product Operations
 - [ ] 11 — Admin and Staff Management Foundations
 - [ ] 12 — Shared Media Delivery, Protection, and Playback Rules
 - [ ] 13 — Cross-Platform Data and Role Alignment Review
 
+
 ### Phase 4 — Quality and Release Readiness
 - [ ] 14 — Empty, Loading, and Error States
 - [ ] 15 — UI Polish and Design-System Consistency
 - [ ] 16 — Deployment and Environment Readiness
 
+
 ## In Progress
 - None
+
 
 ## Open Questions
 - Confirm exact admin/staff permissions for enrollment override, access confirmation, and content moderation.
@@ -45,6 +52,10 @@ Next up: 10 — Manual Payment and Access Confirmation Web Flows
 - Confirm final product policy for lesson publishability: whether lessons may exist without media indefinitely, or whether a later rule should block publishing/access until a media source is attached.
 - Confirm whether a shared media service abstraction should now be introduced before Feature 12 so future providers and playback rules do not spread Cloudinary-specific logic across multiple files.
 - Confirm whether teacher/mobile clients should continue using the existing `/api/cloudinary/upload-signature` route, or whether that should be namespaced to a dedicated teacher/mobile media route for long-term clarity.
+- Confirm the final long-term source of truth for admin/staff role assignment once Feature 11 formalizes role management beyond temporary Prisma Studio edits during development.
+- Confirm whether all-platform subscription approval should remain a `Profile.hasActiveSubscription` flag long-term, or later evolve into a dedicated subscription/access model shared across platforms.
+- Confirm whether teacher-specific payment details should remain per-teacher only, or later support per-course overrides for teachers who need different payment instructions by course.
+
 
 ## Architecture Decisions
 - Web starts now because the mobile side is stable enough for aligned implementation.
@@ -139,6 +150,21 @@ Next up: 10 — Manual Payment and Access Confirmation Web Flows
 - Feature 09 established that lessons may currently exist without attached media, but the missing-media state must be visually obvious in teacher management flows; final publish/access enforcement rules are intentionally deferred to Feature 12.
 - Feature 09 extended localization with Arabic-first lesson/media namespaces and maintained RTL-safe teacher flows for lesson create/edit/media management surfaces.
 - Feature 09 also introduced real teacher-facing error boundaries using localized `app/[locale]/error.tsx` and root `app/global-error.tsx` as a resilience baseline for teacher/media work, aligning with Next.js App Router error-boundary conventions.
+- Feature 10 introduced a real manual payment/access-confirmation foundation centered on three product concerns: singleton global payment configuration, teacher-specific payment details, and student payment requests with admin review.
+- Feature 10 extended the Prisma schema with payment-focused models and access fields, including `PaymentConfig`, `TeacherPaymentDetail`, `PaymentRequest`, `PaymentRequestStatus`, `PaymentRequestType`, and `Profile.hasActiveSubscription`, while intentionally avoiding full billing/accounting scope.
+- Feature 10 established the product rule that global payment configuration is admin-managed, always available to students, and separate from teacher-specific payment details.
+- Feature 10 established the corrected ownership rule for teacher payment details: teachers manage their own payment content from a teacher-facing payment page, while admins can review that content and control whether it is visible to students.
+- Feature 10 established that teacher-payment visibility is a backend-truth field on `TeacherPaymentDetail.isVisibleToStudents`, not a UI-only toggle and not a teacher-controlled flag.
+- Feature 10 implemented the required manual request flow for both one-course payment requests and all-platform subscription requests, capturing student phone number and payment reference/proof text as first-class fields.
+- Feature 10 centralized request creation, approval, and rejection logic inside `lib/mutations/payment.ts`, keeping status transitions and access updates out of page components and thin wrappers.
+- Feature 10 connected admin approval outcomes to truthful access-state updates:
+  - course request approval confirms or creates the matching `Enrollment`
+  - course request rejection preserves a rejected enrollment state
+  - subscription approval updates `Profile.hasActiveSubscription`
+- Feature 10 added payment-focused read/query helpers in `lib/queries/payment.ts`, thin web-triggered Server Actions in `actions/payment.ts`, and mobile/future-consumer Route Handlers under `app/api/payment/*`, preserving the established cross-platform architecture instead of burying logic in web-only code.
+- Feature 10 added localized Arabic-first student/admin/teacher payment surfaces using the shared shadcn-based design system, including a global admin payment config page, teacher self-service payment page, admin teacher-payment visibility review page, student payment instructions page, student request form, and admin request review list.
+- Feature 10 also surfaced a temporary implementation reality: until Feature 11 formalizes role assignment/admin controls, local verification may still rely on direct `Profile.role` edits in Prisma Studio for admin/teacher testing.
+
 
 ## Session Notes
 - Mobile side is now stable enough to begin web implementation.
@@ -189,4 +215,12 @@ Next up: 10 — Manual Payment and Access Confirmation Web Flows
 - Feature 09 added teacher-facing upload polish and safety improvements, including loading state, success feedback, delete confirmation, replacement warning, and dedicated lesson-level video management UX.
 - Feature 09 was further refined after completion with real large-file upload progress UX inside `LessonMediaManager`: percent complete, uploaded size, speed, ETA, cancellation support, and removal of the old spinner-only upload experience.
 - Feature 09 also established localized error-boundary coverage for teacher/media flows using App Router error conventions, reducing the chance of raw crash screens during mutation-heavy teacher operations.
-- Next implementation focus should shift to Feature 10 (manual payment and access confirmation), while keeping Feature 12 in mind for final student-facing media delivery, protection, and playback-policy enforcement.
+- Feature 10 is now complete.
+- Feature 10 added the real manual payment and access-confirmation flow with admin-managed global payment configuration, teacher-managed payment details, admin-controlled teacher-detail visibility, student payment request submission, and admin review actions.
+- Feature 10 extended the Prisma schema with payment-related models and enums, plus a minimal subscription-access field on `Profile`, while intentionally keeping payment gateway/accounting scope out of this feature.
+- Feature 10 preserved the agreed cross-platform architecture through `lib/queries/payment.ts`, `lib/mutations/payment.ts`, `actions/payment.ts`, and `app/api/payment/*` instead of placing business logic inside page components.
+- Feature 10 established the corrected ownership model for teacher payment data: teachers manage their own payment content, admins review it and control student visibility, and students only see teacher-specific payment details when explicitly enabled.
+- Feature 10 connected manual admin review outcomes to truthful access state updates for both course-specific enrollments and all-platform subscription approval.
+- Feature 10 added localized Arabic-first payment/admin/teacher/student UI surfaces on top of the shared shadcn-based design system, while keeping RTL-safe layout and no-hardcoded-visible-string discipline.
+- Feature 10 local verification also highlighted that full product-grade role assignment is still deferred to Feature 11, so temporary Prisma Studio role edits may still be used during development until formal admin/staff role tooling lands.
+- Next implementation focus should now shift to Feature 11 (admin and staff management foundations), while Feature 12 remains important for final media delivery, protection, and playback-policy enforcement.
