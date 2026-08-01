@@ -17,15 +17,22 @@ import {
   reviewPaymentRequestSchema,
 } from "@/lib/validations/payment";
 import { prisma } from "@/lib/prisma";
-
+import {
+  requireAdmin,
+  requireStudent,
+  requireApprovedTeacher,
+} from "@/lib/access/guards";
+const actor = await requireAdmin();
+const studentActor = await requireStudent();
+const teacherActor = await requireApprovedTeacher();
 // ── Admin: Update global payment config ─────────────────────────────────────
 
 export async function updatePaymentConfigAction(formData: unknown) {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
+
+  if (!actor.clerkUserId) throw new Error("Unauthorized");
 
   const profile = await prisma.profile.findUnique({
-    where: { clerkUserId: userId },
+    where: { clerkUserId: actor.clerkUserId },
   });
   if (profile?.role !== "admin") throw new Error("Forbidden");
 
@@ -39,11 +46,11 @@ export async function updatePaymentConfigAction(formData: unknown) {
 // ── Student: Submit a payment request ───────────────────────────────────────
 
 export async function createPaymentRequestAction(formData: unknown) {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
+
+  if (!studentActor.clerkUserId) throw new Error("Unauthorized");
 
   const profile = await prisma.profile.findUnique({
-    where: { clerkUserId: userId },
+    where: { clerkUserId: studentActor.clerkUserId },
   });
   if (!profile) throw new Error("Profile not found");
 
@@ -57,11 +64,11 @@ export async function createPaymentRequestAction(formData: unknown) {
 // ── Admin: Approve or reject a request ──────────────────────────────────────
 
 export async function reviewPaymentRequestAction(formData: unknown) {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
+ 
+  if (!actor.clerkUserId) throw new Error("Unauthorized");
 
   const profile = await prisma.profile.findUnique({
-    where: { clerkUserId: userId },
+    where: { clerkUserId: actor.clerkUserId },
   });
   if (profile?.role !== "admin") throw new Error("Forbidden");
 
@@ -79,28 +86,33 @@ export async function reviewPaymentRequestAction(formData: unknown) {
 
 // Teacher self-service — teacher can only write their OWN record
 export async function upsertMyTeacherPaymentDetailAction(formData: {
-  detailsAr?: string
-  detailsEn?: string
-  whatsappNumber?: string
-  qrImageUrl?: string
+  detailsAr?: string;
+  detailsEn?: string;
+  whatsappNumber?: string;
+  qrImageUrl?: string;
 }) {
-  const { userId } = await auth()
-  if (!userId) throw new Error('Unauthorized')
 
-  await upsertMyTeacherPaymentDetail({ teacherClerkId: userId, ...formData })
-  revalidatePath('/teacher/payment')
+  if (!teacherActor.clerkUserId) throw new Error("Unauthorized");
+
+  await upsertMyTeacherPaymentDetail({
+    teacherClerkId: teacherActor.clerkUserId,
+    ...formData,
+  });
+  revalidatePath("/teacher/payment");
 }
 
 // Admin-only — toggle visibility for a specific teacher
 export async function setTeacherPaymentVisibilityAction(input: {
-  teacherClerkId: string
-  visible: boolean
+  teacherClerkId: string;
+  visible: boolean;
 }) {
-  const { userId } = await auth()
-  if (!userId) throw new Error('Unauthorized')
-  const profile = await prisma.profile.findUnique({ where: { clerkUserId: userId } })
-  if (profile?.role !== 'admin') throw new Error('Forbidden')
 
-  await setTeacherPaymentVisibility(input.teacherClerkId, input.visible)
-  revalidatePath('/admin/payment')
+  if (!actor.clerkUserId) throw new Error("Unauthorized");
+  const profile = await prisma.profile.findUnique({
+    where: { clerkUserId: actor.clerkUserId },
+  });
+  if (profile?.role !== "admin") throw new Error("Forbidden");
+
+  await setTeacherPaymentVisibility(input.teacherClerkId, input.visible);
+  revalidatePath("/admin/payment");
 }

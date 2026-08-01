@@ -1,13 +1,14 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { getProtectedPlaybackUrl } from "@/lib/queries/media";
-
+import { requireAuthenticatedProfile } from "@/lib/access/guards";
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ lessonId: string }> }
 ) {
-  const { userId } = await auth();
-  if (!userId) {
+  
+  const actor = await requireAuthenticatedProfile();
+  if (!actor.clerkUserId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

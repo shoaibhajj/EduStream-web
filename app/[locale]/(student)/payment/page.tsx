@@ -7,12 +7,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import Image from "next/image";
 import { buttonVariants } from "@/components/ui/button";
 import { Link } from "@/i18n/navigation";
+import { requireStudent } from "@/lib/access/guards";
 
 export default async function PaymentInstructionsPage({
   searchParams,
 }: {
   searchParams: { teacherClerkId?: string };
 }) {
+    await requireStudent();
   const { userId } = await auth();
   if (!userId) redirect("/sign-in");
 

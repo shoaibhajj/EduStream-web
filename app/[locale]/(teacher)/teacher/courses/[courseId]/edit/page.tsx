@@ -10,6 +10,10 @@ import {
 } from "@/lib/queries/teacher";
 import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button";
+
+import { forbidden } from "next/navigation";
+import { getCurrentProfile } from "@/lib/access/guards";
+import { isAdmin, isApprovedTeacher } from "@/lib/access/roles";
 type Props = {
   params: Promise<{
     locale: string;
@@ -18,6 +22,7 @@ type Props = {
 };
 
 export default async function EditTeacherCoursePage({ params }: Props) {
+   
   const { locale, courseId } = await params;
   const user = await currentUser();
   const t = await getTranslations("TeacherDashboard");
@@ -26,6 +31,10 @@ export default async function EditTeacherCoursePage({ params }: Props) {
     redirect(`/${locale}/sign-in`);
   }
 
+   const profile = await getCurrentProfile();
+    if (!profile || (!isApprovedTeacher(profile) && !isAdmin(profile))) {
+      forbidden();
+    }
   const [course, subjects] = await Promise.all([
     getTeacherCourseById(courseId, user.id),
     getSubjectsForTeacherCourseForm(),

@@ -18,50 +18,61 @@ enum EnrollmentStatus {
   confirmed
   rejected
 }
+
 enum MediaProvider {
   cloudinary
   external_link
   backblaze_b2
 }
 
+enum TeacherApprovalStatus {
+  not_applicable // for students and admins
+  pending // teacher account awaiting admin review
+  approved // teacher is enabled
+  rejected // teacher was rejected
+}
+
 model Profile {
-  id          String   @id @default(cuid())
-  clerkUserId String   @unique @map("clerk_user_id")
-  role        AppRole  @default(student)
-  displayName String?  @map("display_name")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
-hasActiveSubscription Boolean @default(false) @map("has_active_subscription")
-  enrollments Enrollment[]
-  paymentRequests PaymentRequest[]
+  id                    String                @id @default(cuid())
+  clerkUserId           String                @unique @map("clerk_user_id")
+  role                  AppRole               @default(student)
+  displayName           String?               @map("display_name")
+  createdAt             DateTime              @default(now()) @map("created_at")
+  updatedAt             DateTime              @updatedAt @map("updated_at")
+  hasActiveSubscription Boolean               @default(false) @map("has_active_subscription")
+  teacherApprovalStatus TeacherApprovalStatus @default(not_applicable) @map("teacher_approval_status")
+  email                 String? // synced from Clerk, useful for admin UI
+  avatarUrl             String?               @map("avatar_url")
+  enrollments           Enrollment[]
+  paymentRequests       PaymentRequest[]
 
   @@map("profiles")
 }
 
 model AcademicYear {
-  id        String    @id @default(cuid())
-  nameAr    String    @map("name_ar")
-  nameEn    String?   @map("name_en")
-  sortOrder Int       @default(0) @map("sort_order")
-  isActive  Boolean   @default(true) @map("is_active")
-  createdAt DateTime  @default(now()) @map("created_at")
+  id        String   @id @default(cuid())
+  nameAr    String   @map("name_ar")
+  nameEn    String?  @map("name_en")
+  sortOrder Int      @default(0) @map("sort_order")
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
 
-  subjects  Subject[]
+  subjects Subject[]
 
   @@map("academic_years")
 }
 
 model Subject {
-  id             String       @id @default(cuid())
-  academicYearId String       @map("academic_year_id")
-  nameAr         String       @map("name_ar")
-  nameEn         String?      @map("name_en")
-  sortOrder      Int          @default(0) @map("sort_order")
-  isActive       Boolean      @default(true) @map("is_active")
-  createdAt      DateTime     @default(now()) @map("created_at")
+  id             String   @id @default(cuid())
+  academicYearId String   @map("academic_year_id")
+  nameAr         String   @map("name_ar")
+  nameEn         String?  @map("name_en")
+  sortOrder      Int      @default(0) @map("sort_order")
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at")
 
-  academicYear   AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
-  courses        Course[]
+  academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+  courses      Course[]
 
   @@index([academicYearId])
   @@map("subjects")
@@ -76,19 +87,19 @@ model Course {
   descriptionAr String?  @map("description_ar")
   descriptionEn String?  @map("description_en")
   thumbnailUrl  String?  @map("thumbnail_url")
-   price         Int      @default(0)        
+  price         Int      @default(0)
   isPublished   Boolean  @default(false) @map("is_published")
   sortOrder     Int      @default(0) @map("sort_order")
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
-  subject       Subject      @relation(fields: [subjectId], references: [id], onDelete: Cascade)
-  lessons       Lesson[]
-  enrollments   Enrollment[]
+  subject         Subject          @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  lessons         Lesson[]
+  enrollments     Enrollment[]
+  paymentRequests PaymentRequest[]
 
   @@index([subjectId])
-    @@index([teacherId]) 
-    paymentRequests PaymentRequest[]
+  @@index([teacherId])
   @@map("courses")
 }
 
@@ -98,36 +109,36 @@ model Lesson {
   titleAr     String   @map("title_ar")
   titleEn     String?  @map("title_en")
   description String?
-  videoUrl    String?  @map("video_url")   // @deprecated — use LessonMedia instead
+  videoUrl    String?  @map("video_url") // @deprecated — use LessonMedia instead
   isPreview   Boolean  @default(false) @map("is_preview")
   isPublished Boolean  @default(false) @map("is_published")
   sortOrder   Int      @default(0) @map("sort_order")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  course      Course      @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  media       LessonMedia?
+  course Course       @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  media  LessonMedia?
 
   @@index([courseId])
   @@map("lessons")
 }
 
 model LessonMedia {
-  id String @id @default(cuid())
+  id       String @id @default(cuid())
   lessonId String @unique @map("lesson_id")
 
   provider MediaProvider
 
   // Cloudinary-specific fields
-  cloudinaryPublicId String? @map("cloudinary_public_id")
+  cloudinaryPublicId     String? @map("cloudinary_public_id")
   cloudinaryResourceType String? @default("video") @map("cloudinary_resource_type")
 
   // External link field
   externalUrl String? @map("external_url")
 
   // Shared metadata
-  durationSeconds Int? @map("duration_seconds")
-  isReady Boolean @default(false) @map("is_ready")
+  durationSeconds Int?    @map("duration_seconds")
+  isReady         Boolean @default(false) @map("is_ready")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -146,8 +157,8 @@ model Enrollment {
   createdAt DateTime         @default(now()) @map("created_at")
   updatedAt DateTime         @updatedAt @map("updated_at")
 
-  profile   Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
-  course    Course  @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  course  Course  @relation(fields: [courseId], references: [id], onDelete: Cascade)
 
   @@unique([profileId, courseId])
   @@index([profileId])
@@ -170,39 +181,37 @@ enum PaymentRequestType {
 
 /// One global row — admin-managed. Create exactly one via seed or admin UI.
 model PaymentConfig {
-  id                         String   @id @default(cuid())
+  id String @id @default(cuid())
 
   // Global bank/transfer info (Arabic primary)
-  instructionsAr             String?  @map("instructions_ar")
-  instructionsEn             String?  @map("instructions_en")
+  instructionsAr String? @map("instructions_ar")
+  instructionsEn String? @map("instructions_en")
 
   // Sham Cash block
-  shamCashQrImageUrl         String?  @map("sham_cash_qr_image_url")
-  shamCashWhatsappNumber     String?  @map("sham_cash_whatsapp_number")
-  shamCashInstructionsAr     String?  @map("sham_cash_instructions_ar")
-  shamCashInstructionsEn     String?  @map("sham_cash_instructions_en")
-
-
+  shamCashQrImageUrl     String? @map("sham_cash_qr_image_url")
+  shamCashWhatsappNumber String? @map("sham_cash_whatsapp_number")
+  shamCashInstructionsAr String? @map("sham_cash_instructions_ar")
+  shamCashInstructionsEn String? @map("sham_cash_instructions_en")
 
   createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt     @map("updated_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("payment_configs")
 }
 
 /// Per-teacher optional payment details managed by admin.
 model TeacherPaymentDetail {
-  id             String  @id @default(cuid())
-  teacherClerkId String  @unique @map("teacher_clerk_id") // Clerk user ID
+  id             String @id @default(cuid())
+  teacherClerkId String @unique @map("teacher_clerk_id") // Clerk user ID
 
-  detailsAr      String? @map("details_ar")
-  detailsEn      String? @map("details_en")
-  whatsappNumber String? @map("whatsapp_number")
+  detailsAr           String? @map("details_ar")
+  detailsEn           String? @map("details_en")
+  whatsappNumber      String? @map("whatsapp_number")
   qrImageUrl          String? @map("qr_image_url")
   isVisibleToStudents Boolean @default(false) @map("is_visible_to_students")
 
   createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt     @map("updated_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("teacher_payment_details")
 }
@@ -215,18 +224,18 @@ model PaymentRequest {
   requestType PaymentRequestType   @map("request_type")
 
   // Null when requestType = subscription
-  courseId    String?              @map("course_id")
+  courseId String? @map("course_id")
 
   // Student-provided
-  phoneNumber     String  @map("phone_number")
+  phoneNumber      String @map("phone_number")
   paymentReference String @map("payment_reference") // proof text / transfer ref
 
   // Admin review
-  adminNote   String?  @map("admin_note")
-  reviewedAt  DateTime? @map("reviewed_at")
+  adminNote  String?   @map("admin_note")
+  reviewedAt DateTime? @map("reviewed_at")
 
   createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt     @map("updated_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
   course  Course? @relation(fields: [courseId], references: [id], onDelete: SetNull)

@@ -5,12 +5,20 @@ import { getTranslations } from "next-intl/server";
 import { prisma } from "@/lib/prisma";
 import { SectionCard } from "@/components/shared/SectionCard";
 import { TeacherLessonForm } from "@/components/teacher/TeacherLessonForm";
-
+import { requireApprovedTeacher } from "@/lib/access/guards";
+import { forbidden } from "next/navigation";
+import { getCurrentProfile } from "@/lib/access/guards";
+import { isAdmin, isApprovedTeacher } from "@/lib/access/roles";
 type Props = {
   params: Promise<{ locale: string; courseId: string; lessonId: string }>;
 };
 
 export default async function EditTeacherLessonPage({ params }: Props) {
+   const profile = await getCurrentProfile();
+
+   if (!profile || (!isApprovedTeacher(profile) && !isAdmin(profile))) {
+     forbidden();
+   }
   const { locale, courseId, lessonId } = await params;
   const user = await currentUser();
   if (!user) redirect(`/${locale}/sign-in`);

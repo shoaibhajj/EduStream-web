@@ -3,12 +3,18 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { createLessonSchema } from "@/lib/validations/lesson";
-import { createLessonForTeacher, updateLessonForTeacher } from "@/lib/mutations/lesson";
+import {
+  createLessonForTeacher,
+  updateLessonForTeacher,
+} from "@/lib/mutations/lesson";
 import { deleteLessonForTeacher } from "@/lib/mutations/lesson";
-export async function createLessonAction(formData: FormData) {
-  const { userId } = await auth();
+import { requireApprovedTeacher } from "@/lib/access/guards";
 
-  if (!userId) {
+const actor = await requireApprovedTeacher();
+export async function createLessonAction(formData: FormData) {
+
+
+  if (!actor.clerkUserId) {
     return { error: "unauthorized" };
   }
 
@@ -31,7 +37,7 @@ export async function createLessonAction(formData: FormData) {
   let lessonId: string;
 
   try {
-    const lesson = await createLessonForTeacher(parsed.data, userId);
+    const lesson = await createLessonForTeacher(parsed.data, actor.clerkUserId);
     lessonId = lesson.id;
   } catch (error) {
     console.error("[actions/lesson] createLessonAction", error);
@@ -42,8 +48,8 @@ export async function createLessonAction(formData: FormData) {
 }
 
 export async function updateLessonAction(formData: FormData) {
-  const { userId } = await auth();
-  if (!userId) return { error: "unauthorized" };
+
+  if (!actor.clerkUserId) return { error: "unauthorized" };
 
   const lessonId = String(formData.get("lessonId") ?? "");
   const raw = {
@@ -63,7 +69,7 @@ export async function updateLessonAction(formData: FormData) {
     await updateLessonForTeacher(
       lessonId,
       parsed.data.courseId,
-      userId,
+      actor.clerkUserId,
       parsed.data
     );
   } catch (error) {
@@ -74,20 +80,18 @@ export async function updateLessonAction(formData: FormData) {
   redirect(`/ar/teacher/courses/${parsed.data.courseId}/lessons/${lessonId}`);
 }
 
-
-
 export async function deleteLessonAction(formData: FormData): Promise<void> {
-  const { userId } = await auth();
+  
 
   const lessonId = String(formData.get("lessonId") ?? "");
   const courseId = String(formData.get("courseId") ?? "");
 
-  if (!userId || !lessonId || !courseId) {
+  if (!actor.clerkUserId || !lessonId || !courseId) {
     redirect(`/ar/teacher/courses/${courseId}?deleteError=validation_failed`);
   }
 
   try {
-    await deleteLessonForTeacher(lessonId, courseId, userId);
+    await deleteLessonForTeacher(lessonId, courseId, actor.clerkUserId);
   } catch (error) {
     console.error("[actions/lesson] deleteLessonAction", error);
     redirect(`/ar/teacher/courses/${courseId}?deleteError=server_error`);

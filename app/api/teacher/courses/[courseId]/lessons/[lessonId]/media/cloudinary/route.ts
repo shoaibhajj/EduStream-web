@@ -3,14 +3,15 @@ import { auth } from "@clerk/nextjs/server";
 
 import { prisma } from "@/lib/prisma";
 import { saveCloudinaryMedia } from "@/lib/mutations/media";
-
+import { requireApprovedTeacher } from "@/lib/access/guards";
 type Context = {
   params: Promise<{ lessonId: string }>;
 };
 
 export async function POST(request: Request, { params }: Context) {
-  const { userId } = await auth();
-  if (!userId) {
+  const actor = await requireApprovedTeacher();
+
+  if (!actor.clerkUserId) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
@@ -20,7 +21,7 @@ export async function POST(request: Request, { params }: Context) {
   const lesson = await prisma.lesson.findFirst({
     where: {
       id: lessonId,
-      course: { teacherId: userId },
+      course: { teacherId: actor.clerkUserId },
     },
     select: { id: true },
   });

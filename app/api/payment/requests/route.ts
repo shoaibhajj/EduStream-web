@@ -4,14 +4,15 @@ import { prisma } from "@/lib/prisma";
 import { createPaymentRequest } from "@/lib/mutations/payment";
 import { createPaymentRequestSchema } from "@/lib/validations/payment";
 import { getStudentPaymentRequests } from "@/lib/queries/payment";
-
+import { requireStudent } from "@/lib/access/guards";
 export async function GET() {
+  const actor = await requireStudent();
   try {
-    const { userId } = await auth();
-    if (!userId)
+ 
+    if (!actor.clerkUserId)
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const profile = await prisma.profile.findUnique({
-      where: { clerkUserId: userId },
+      where: { clerkUserId: actor.clerkUserId },
     });
     if (!profile)
       return NextResponse.json({ error: "Profile not found" }, { status: 404 });
@@ -24,12 +25,13 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+    const actor = await requireStudent();
   try {
-    const { userId } = await auth();
-    if (!userId)
+  
+    if (!actor.clerkUserId)
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const profile = await prisma.profile.findUnique({
-      where: { clerkUserId: userId },
+      where: { clerkUserId: actor.clerkUserId },
     });
     if (!profile)
       return NextResponse.json({ error: "Profile not found" }, { status: 404 });

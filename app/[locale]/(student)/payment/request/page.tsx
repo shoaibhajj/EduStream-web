@@ -2,8 +2,10 @@ import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { PaymentRequestForm } from "./PaymentRequestForm";
+import { requireStudent } from "@/lib/access/guards";
 
 export default async function PaymentRequestPage() {
+    await requireStudent();
   const { userId } = await auth();
   if (!userId) redirect("/sign-in");
 

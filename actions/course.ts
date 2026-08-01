@@ -12,6 +12,9 @@ import {
   courseFormSchema,
   updateCourseFormSchema,
 } from "@/lib/validations/course";
+import { requireApprovedTeacher } from "@/lib/access/guards";
+
+const actor = await requireApprovedTeacher();
 
 function toOptionalString(value: FormDataEntryValue | null) {
   if (typeof value !== "string") return "";
@@ -19,9 +22,9 @@ function toOptionalString(value: FormDataEntryValue | null) {
 }
 
 export async function createCourseAction(formData: FormData) {
-  const { userId } = await auth();
 
-  if (!userId) {
+
+  if (!actor.clerkUserId) {
     return {
       success: false,
       error: "UNAUTHORIZED",
@@ -46,7 +49,7 @@ export async function createCourseAction(formData: FormData) {
   }
 
   const course = await createCourse({
-    teacherId: userId,
+    teacherId: actor.clerkUserId,
     ...parsed.data,
   });
 
@@ -56,9 +59,9 @@ export async function createCourseAction(formData: FormData) {
 }
 
 export async function updateCourseAction(formData: FormData) {
-  const { userId } = await auth();
 
-  if (!userId) {
+
+  if (!actor.clerkUserId) {
     return {
       success: false,
       error: "UNAUTHORIZED",
@@ -84,7 +87,7 @@ export async function updateCourseAction(formData: FormData) {
   }
 
   await updateCourseBasics({
-    teacherId: userId,
+    teacherId: actor.clerkUserId,
     ...parsed.data,
   });
 
@@ -99,9 +102,9 @@ export async function setCoursePublishStateAction(input: {
   courseId: string;
   isPublished: boolean;
 }) {
-  const { userId } = await auth();
 
-  if (!userId) {
+
+  if (!actor.clerkUserId) {
     return {
       success: false,
       error: "UNAUTHORIZED",
@@ -110,7 +113,7 @@ export async function setCoursePublishStateAction(input: {
 
   await setCoursePublishState({
     courseId: input.courseId,
-    teacherId: userId,
+    teacherId: actor.clerkUserId,
     isPublished: input.isPublished,
   });
 

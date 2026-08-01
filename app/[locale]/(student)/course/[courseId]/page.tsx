@@ -16,12 +16,15 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {  requireStudent } from "@/lib/access/guards";
 
 export default async function CourseDetailPage({
   params,
 }: {
   params: Promise<{ locale: string; courseId: string }>;
 }) {
+
+      await requireStudent();
   const { locale, courseId } = await params;
   const t = await getTranslations("CourseDetail");
 

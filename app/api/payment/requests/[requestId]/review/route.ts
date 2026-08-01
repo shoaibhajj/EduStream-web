@@ -5,17 +5,19 @@ import {
   approvePaymentRequest,
   rejectPaymentRequest,
 } from "@/lib/mutations/payment";
-
+import { requireAdmin } from "@/lib/access/guards";
 export async function POST(
   request: Request,
-  { params }: { params: { requestId: string } }
+  context: { params: Promise<{ requestId: string }> }
 ) {
+  const actor = await requireAdmin();
+  const { requestId } = await context.params;
   try {
-    const { userId } = await auth();
-    if (!userId)
+ 
+    if (!actor.clerkUserId)
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const profile = await prisma.profile.findUnique({
-      where: { clerkUserId: userId },
+      where: { clerkUserId: actor.clerkUserId },
     });
     if (profile?.role !== "admin")
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -27,9 +29,9 @@ export async function POST(
     };
 
     if (action === "approve")
-      await approvePaymentRequest(params.requestId, adminNote);
+      await approvePaymentRequest(requestId, adminNote);
     else if (action === "reject")
-      await rejectPaymentRequest(params.requestId, adminNote);
+      await rejectPaymentRequest(requestId, adminNote);
     else return NextResponse.json({ error: "Invalid action" }, { status: 400 });
 
     return NextResponse.json({ ok: true });

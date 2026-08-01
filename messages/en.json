@@ -209,5 +209,20 @@
     "visibleToStudents": "Visible to Students",
     "myPaymentDetails": "My Payment Details",
     "saveMyDetails": "Save My Details"
+  },
+  "Admin": {
+    "Teachers": {
+      "title": "Teacher Management",
+      "allTeachersHeading": "All Teachers",
+      "emptyState": "No teachers registered yet",
+      "approve": "Approve",
+      "reject": "Reject",
+      "status": {
+        "approved": "Active",
+        "pending": "Pending",
+        "rejected": "Rejected",
+        "not_applicable": "—"
+      }
+    }
   }
 }

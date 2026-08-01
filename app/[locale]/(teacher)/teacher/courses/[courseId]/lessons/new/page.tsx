@@ -7,7 +7,10 @@ import { getTeacherCourseById } from "@/lib/queries/teacher";
 import { TeacherLessonForm } from "@/components/teacher/TeacherLessonForm";
 import { SectionCard } from "@/components/shared/SectionCard";
 import { buttonVariants } from "@/components/ui/button";
-
+import { requireApprovedTeacher } from "@/lib/access/guards";
+import { forbidden } from "next/navigation";
+import { getCurrentProfile } from "@/lib/access/guards";
+import { isAdmin, isApprovedTeacher } from "@/lib/access/roles";
 type Props = {
   params: Promise<{
     locale: string;
@@ -16,6 +19,11 @@ type Props = {
 };
 
 export default async function NewTeacherLessonPage({ params }: Props) {
+  const profile = await getCurrentProfile();
+
+  if (!profile || (!isApprovedTeacher(profile) && !isAdmin(profile))) {
+    forbidden();
+  }
   const { locale, courseId } = await params;
   const user = await currentUser();
 

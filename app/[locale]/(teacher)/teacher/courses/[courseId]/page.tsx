@@ -11,6 +11,10 @@ import { SectionCard } from "@/components/shared/SectionCard";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { deleteLessonAction } from "@/actions/lesson";
+import { requireApprovedTeacher } from "@/lib/access/guards";
+import { forbidden } from "next/navigation";
+import { getCurrentProfile } from "@/lib/access/guards";
+import { isAdmin, isApprovedTeacher } from "@/lib/access/roles";
 
 type Props = {
   params: Promise<{ locale: string; courseId: string }>;
@@ -21,6 +25,11 @@ export default async function TeacherCourseDetailsPage({
   params,
   searchParams,
 }: Props) {
+  const profile = await getCurrentProfile();
+
+  if (!profile || (!isApprovedTeacher(profile) && !isAdmin(profile))) {
+    forbidden();
+  }
   const { locale, courseId } = await params;
   const { deleteError } = await searchParams;
   const user = await currentUser();

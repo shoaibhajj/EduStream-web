@@ -1,11 +1,13 @@
 ## Current Status
-Phase: Phase 2 — Core Product Flows
-Current Goal: Continue deeper product flows on top of the established shared web design-system foundation so future work stays consistent, RTL-safe, localized, and easier to evolve
-Last completed: 10 — Manual Payment and Access Confirmation Web Flows
-Next up: 11 — Admin and Staff Management Foundations
+Phase: Phase 3 — Shared Product Operations
+Current Goal: Formalize shared app-level identity, role enforcement, teacher approval, and backend access rules so admin/teacher/student behavior is driven by DB truth and reusable across web and future mobile consumers
+Last completed: 11 — Admin and Staff Management Foundations
+Next up: 12 — Shared Media Delivery, Protection, and Playback Rules
+
 
 
 ## Progress
+
 
 
 ### Phase 1 — Real Web Foundation
@@ -13,6 +15,7 @@ Next up: 11 — Admin and Staff Management Foundations
 - [x] 02 — Configure Clerk Authentication Foundation
 - [x] 03 — Configure Database Foundation (Neon + Prisma)
 - [x] 04 — Establish RTL, Localization, and App Shell Foundation
+
 
 
 ### Phase 2 — Core Product Flows
@@ -24,10 +27,12 @@ Next up: 11 — Admin and Staff Management Foundations
 - [x] 10 — Manual Payment and Access Confirmation Web Flows
 
 
+
 ### Phase 3 — Shared Product Operations
-- [ ] 11 — Admin and Staff Management Foundations
+- [x] 11 — Admin and Staff Management Foundations
 - [ ] 12 — Shared Media Delivery, Protection, and Playback Rules
 - [ ] 13 — Cross-Platform Data and Role Alignment Review
+
 
 
 ### Phase 4 — Quality and Release Readiness
@@ -36,25 +41,23 @@ Next up: 11 — Admin and Staff Management Foundations
 - [ ] 16 — Deployment and Environment Readiness
 
 
+
 ## In Progress
 - None
 
-
 ## Open Questions
-- Confirm exact admin/staff permissions for enrollment override, access confirmation, and content moderation.
+- Confirm exact admin/staff permissions for enrollment override, access confirmation, and content moderation beyond the current role/approval foundation.
 - Confirm which entities and permissions must be fully shared between web and mobile from the start.
 - Confirm the final media-handling rules for uploaded videos vs externally linked videos.
 - Confirm whether Cloudinary is the only upload provider for owned video/media assets, or whether Backblaze B2 should be added as the next owned-storage provider.
 - Confirm how preview/free-lesson media should be modeled across uploaded and linked content now that lesson media is provider-aware.
-- Confirm whether Neon + Prisma is the permanent shared backend direction for web only, or whether future mobile/backend alignment will also move away from Supabase.
-- Confirm whether mobile API routes should continue using the same Clerk-backed teacher authentication model immediately in Feature 10, or whether mobile token-verification hardening needs a separate implementation pass.
 - Confirm whether student playback should ever expose raw external links directly, or whether externally linked media must always be wrapped in a controlled player surface.
 - Confirm final product policy for lesson publishability: whether lessons may exist without media indefinitely, or whether a later rule should block publishing/access until a media source is attached.
 - Confirm whether a shared media service abstraction should now be introduced before Feature 12 so future providers and playback rules do not spread Cloudinary-specific logic across multiple files.
 - Confirm whether teacher/mobile clients should continue using the existing `/api/cloudinary/upload-signature` route, or whether that should be namespaced to a dedicated teacher/mobile media route for long-term clarity.
-- Confirm the final long-term source of truth for admin/staff role assignment once Feature 11 formalizes role management beyond temporary Prisma Studio edits during development.
 - Confirm whether all-platform subscription approval should remain a `Profile.hasActiveSubscription` flag long-term, or later evolve into a dedicated subscription/access model shared across platforms.
 - Confirm whether teacher-specific payment details should remain per-teacher only, or later support per-course overrides for teachers who need different payment instructions by course.
+
 
 
 ## Architecture Decisions
@@ -165,6 +168,28 @@ Next up: 11 — Admin and Staff Management Foundations
 - Feature 10 added localized Arabic-first student/admin/teacher payment surfaces using the shared shadcn-based design system, including a global admin payment config page, teacher self-service payment page, admin teacher-payment visibility review page, student payment instructions page, student request form, and admin request review list.
 - Feature 10 also surfaced a temporary implementation reality: until Feature 11 formalizes role assignment/admin controls, local verification may still rely on direct `Profile.role` edits in Prisma Studio for admin/teacher testing.
 
+- Feature 11 formalized the app-level identity bridge: Clerk remains the authentication provider, while the `profiles` table in Neon/Prisma is now the source of truth for app-level role, approval, and shared authorization decisions.
+- Feature 11 adopted Clerk webhooks as the long-term profile-sync mechanism, replacing any manual-profile-creation assumption with idempotent Clerk-to-database synchronization for user create/update/delete events.
+- Feature 11 confirmed that app authorization must not depend on Clerk auth presence alone; all meaningful role checks must resolve the synced DB profile first.
+- Feature 11 established the shared role model now active in backend logic: `student`, `teacher`, and `admin`, with teacher capability gated by explicit admin approval state rather than role label alone.
+- Feature 11 introduced teacher approval as a first-class product rule: teacher accounts may exist in a pending/rejected state, and teacher capabilities must remain disabled until approved by an admin.
+- Feature 11 established reusable access-control helpers in `lib/access/*` as the shared authorization layer for pages, Server Actions, queries/mutations callers, and Route Handlers, rather than scattering ad-hoc role checks across UI components.
+- Feature 11 clarified the protection strategy by surface:
+  - pages should handle expected authorization failures with a controlled UX (`forbidden()` / 403 behavior) rather than falling into generic unexpected-error boundaries
+  - Server Actions and Route Handlers must still enforce backend authorization directly
+  - middleware/proxy remains useful for broad route protection but is not the source of truth for role authorization
+- Feature 11 extended the established architecture pattern so protected capabilities are enforced consistently across:
+  - `lib/queries/*` and `lib/mutations/*` as the shared business/data layer
+  - `actions/*` as thin web-only wrappers with role-aware guards
+  - `app/api/*` as thin HTTP wrappers for mobile/external consumers using the same shared backend rules
+- Feature 11 reviewed and hardened teacher/admin/student-sensitive pages, Server Actions, and Route Handlers so signed-in users cannot rely on “logged in only” behavior to reach protected product flows.
+- Feature 11 established that actor identity for protected backend operations must be derived from Clerk session + synced DB profile on the server side, not trusted from client-supplied IDs such as `teacherId` in request input.
+- Feature 11 added shared lesson-access foundations through centralized playback/access checks so future media delivery for web and mobile can depend on the same backend authorization rules before returning protected media details.
+- Feature 11 preserved Cloudinary as the current owned-media provider while explicitly separating media authorization from media URL generation: backend access checks happen first, then protected/signed media delivery details may be returned.
+- Feature 11 added a real admin-facing teacher management foundation using the shared shadcn-based UI layer and localization discipline, rather than temporary role truth living only in Prisma Studio edits.
+- Feature 11 keeps localization discipline intact for newly introduced role/approval/admin-management UI, with Arabic-first defaults, English parity, and RTL-safe layouts preserved.
+
+
 
 ## Session Notes
 - Mobile side is now stable enough to begin web implementation.
@@ -224,3 +249,12 @@ Next up: 11 — Admin and Staff Management Foundations
 - Feature 10 added localized Arabic-first payment/admin/teacher/student UI surfaces on top of the shared shadcn-based design system, while keeping RTL-safe layout and no-hardcoded-visible-string discipline.
 - Feature 10 local verification also highlighted that full product-grade role assignment is still deferred to Feature 11, so temporary Prisma Studio role edits may still be used during development until formal admin/staff role tooling lands.
 - Next implementation focus should now shift to Feature 11 (admin and staff management foundations), while Feature 12 remains important for final media delivery, protection, and playback-policy enforcement.
+- Feature 11 is now complete.
+- Feature 11 closed the major gap between Clerk authentication and real app authorization by syncing Clerk users into the `profiles` table automatically through webhooks instead of depending on manual DB profile creation.
+- Feature 11 established the DB-backed role/approval model required for truthful product behavior: `student`, `teacher`, and `admin`, with teacher capability gated by explicit admin approval state.
+- Feature 11 added shared backend access guards so teacher/admin/student-sensitive flows are protected in pages, Server Actions, and Route Handlers rather than relying on UI hiding or signed-in state alone.
+- Feature 11 also surfaced and fixed an important product-security gap during verification: some teacher pages and mutations were still reachable by plain signed-in students until role-aware guards were systematically applied.
+- Feature 11 improved the UX of expected authorization failures by moving protected teacher/admin page denials away from generic crash-style error boundaries toward proper forbidden/access-denied handling.
+- Feature 11 established the first shared playback/access-control foundation by centralizing lesson-access checks that future protected media delivery and playback routes can reuse across web and mobile consumers.
+- Local verification for Feature 11 confirmed Clerk webhook sync works with ngrok during development, profile records are created/updated correctly, and role-aware protection is now active across the protected teacher/admin surfaces that were reviewed.
+- Next implementation focus should now shift to Feature 12 (shared media delivery, protection, and playback rules), building on the role-aware identity and access-control foundation completed in Feature 11.

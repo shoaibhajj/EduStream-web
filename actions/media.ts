@@ -11,10 +11,12 @@ import {
   saveCloudinaryMediaSchema,
   saveExternalLinkMediaSchema,
 } from "@/lib/validations/media";
+import { requireApprovedTeacher } from "@/lib/access/guards";
+
+const actor = await requireApprovedTeacher();
 
 export async function saveCloudinaryMediaAction(formData: FormData) {
-  const { userId } = await auth();
-  if (!userId) return { error: "unauthorized" };
+  if (!actor.clerkUserId) return { error: "unauthorized" };
 
   const raw = {
     lessonId: formData.get("lessonId"),
@@ -39,8 +41,8 @@ export async function saveCloudinaryMediaAction(formData: FormData) {
 }
 
 export async function saveExternalLinkMediaAction(formData: FormData) {
-  const { userId } = await auth();
-  if (!userId) return { error: "unauthorized" };
+
+  if (!actor.clerkUserId) return { error: "unauthorized" };
 
   const raw = {
     lessonId: formData.get("lessonId"),
@@ -61,8 +63,7 @@ export async function saveExternalLinkMediaAction(formData: FormData) {
 }
 
 export async function deleteLessonMediaAction(lessonId: string) {
-  const { userId } = await auth();
-  if (!userId) return { error: "unauthorized" };
+  if (!actor.clerkUserId) return { error: "unauthorized" };
 
   try {
     await deleteLessonMedia(lessonId);

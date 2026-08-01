@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
 import { getStudentPaymentInstructions } from "@/lib/queries/payment";
-
+import { requireAdmin } from "@/lib/access/guards";
 export async function GET(request: Request) {
+  const actor = await requireAdmin();
   try {
-    const { searchParams } = new URL(request.url);
-    const teacherClerkId = searchParams.get("teacherClerkId") ?? undefined;
-    const data = await getStudentPaymentInstructions(teacherClerkId);
+    const data = await getStudentPaymentInstructions(actor.clerkUserId);
     return NextResponse.json(data);
   } catch (e) {
     console.error("[api/payment/config]", e);

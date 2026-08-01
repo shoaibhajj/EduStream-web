@@ -7,6 +7,10 @@ import { CourseForm } from "@/components/teacher/CourseForm";
 import { getSubjectsForTeacherCourseForm } from "@/lib/queries/teacher";
 import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button";
+import { requireApprovedTeacher } from "@/lib/access/guards";
+import { forbidden } from "next/navigation";
+import { getCurrentProfile } from "@/lib/access/guards";
+import { isAdmin, isApprovedTeacher } from "@/lib/access/roles";
 type Props = {
   params: Promise<{
     locale: string;
@@ -14,6 +18,11 @@ type Props = {
 };
 
 export default async function NewTeacherCoursePage({ params }: Props) {
+  const profile = await getCurrentProfile();
+
+  if (!profile || (!isApprovedTeacher(profile) && !isAdmin(profile))) {
+    forbidden();
+  }
   const { locale } = await params;
   const user = await currentUser();
   const t = await getTranslations("TeacherDashboard");
@@ -41,17 +50,6 @@ export default async function NewTeacherCoursePage({ params }: Props) {
             </h1>
             <CourseForm mode="create" subjects={subjects} />
           </div>
-        </SectionCard>
-      </div>
-      <div className="mx-auto w-full max-w-3xl">
-        <SectionCard>
-          <div className="mb-6">
-            <h1 className="text-xl font-semibold text-text-primary">
-              {t("createCourse")}
-            </h1>
-          </div>
-
-          <CourseForm mode="create" subjects={subjects} />
         </SectionCard>
       </div>
     </main>

@@ -4,12 +4,14 @@ import { getActiveAcademicYears } from "@/lib/queries/browse";
 import { SectionCard } from "@/components/shared/SectionCard";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ErrorState } from "@/components/shared/ErrorState";
+import { requireStudent } from "@/lib/access/guards";
 
 export default async function BrowsePage({
   params,
 }: {
   params: Promise<{ locale: string }>;
 }) {
+  await requireStudent();
   const { locale } = await params;
   const t = await getTranslations("Browse");
 

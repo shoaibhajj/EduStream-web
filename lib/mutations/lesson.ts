@@ -30,7 +30,6 @@ export async function createLessonForTeacher(
   });
 }
 
-
 export async function updateLessonForTeacher(
   lessonId: string,
   courseId: string,
@@ -55,8 +54,6 @@ export async function updateLessonForTeacher(
     },
   });
 }
-
-
 
 export async function deleteLessonForTeacher(
   lessonId: string,

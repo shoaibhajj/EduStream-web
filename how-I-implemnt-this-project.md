@@ -7814,3 +7814,539 @@ TITLE Moallem Academy Web Implementation Log - Notes for future features...
 - If teacher monetization becomes course-specific later, `TeacherPaymentDetail` may need optional per-course overrides.
 - Feature 12 should keep student-facing lesson playback and media protection rules aligned with the access truth established by approved enrollments and subscription flags.
 - Any mobile payment-management path should reuse the same `lib/queries/payment.ts` and `lib/mutations/payment.ts` layers instead of duplicating business logic in separate web/mobile implementations.
+
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Feature 11 Admin and Staff Management Foundations - Goal...
+
+Establish the missing bridge between Clerk authentication and real app-level authorization for Moallem Academy using:
+
+- Clerk → database profile sync through webhooks
+- DB-backed app roles (`student`, `teacher`, `admin`) as the source of truth
+- teacher approval state controlled by admin
+- reusable backend authorization helpers shared across pages, Server Actions, and Route Handlers
+- protected teacher/admin flows that no longer depend on “logged in only”
+- the first shared playback/access-control foundation for future protected media delivery
+- Arabic-first, localized, RTL-safe admin/staff UI built on the shared shadcn-based design system
+
+This feature is about making auth truthful at the product level. Clerk stays responsible for identity and sessions, while Prisma-backed `profiles` becomes the source of truth for role, approval, and access decisions.
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Decisions used for this feature...
+
+- Clerk remains the authentication provider. It does not become the source of truth for app roles.
+- The `profiles` table is the app-level source of truth for:
+  - role
+  - approval readiness
+  - future shared access decisions
+- Clerk user records must sync automatically into the database through webhooks rather than manual profile creation.
+- Teacher access is not enabled by role alone. Teacher capabilities require explicit admin approval.
+- Admin access must be enforced in backend logic, not by hiding links or buttons only.
+- New backend authorization work follows the existing shared architecture:
+  - `lib/queries/*` for reads
+  - `lib/mutations/*` for writes
+  - `actions/*` for thin web-only Server Action wrappers
+  - `app/api/*` for thin Route Handlers for mobile/external consumers
+- Expected authorization failures in pages should be treated as permission denials, not generic unexpected crashes.
+- Shared lesson/media access decisions must be centralized now so Feature 12 can build protected playback on top of them cleanly.
+- All visible strings introduced in admin/teacher approval UI must go through localization files, not hardcoded component text.
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 1 Inspect the current auth and role reality - What was reviewed...
+
+Before changing code, the current project reality was inspected to confirm what already existed and what was still missing:
+
+- Clerk sign-in/sign-up was already wired and working
+- Prisma `Profile` already contained a `role` field and `clerkUserId`
+- teacher/admin product flows existed from earlier features, but many were still only protected by “signed in” assumptions or partial ownership checks
+- no complete Clerk → DB profile sync flow existed yet
+- no finished teacher approval state existed yet
+- no shared, centralized backend authorization layer existed yet for all page/action/API entry points
+- Feature 10 had exposed a temporary limitation: role testing still depended on manual Prisma Studio edits
+
+This inspection confirmed that Feature 11 was not about rebuilding auth from scratch. It was about connecting real auth identity to real app authorization truth.
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 2 Extend the profile model for approval readiness - Files updated...
+
+- `prisma/schema.prisma`
+
+TITLE Moallem Academy Web Implementation Log - Step 2 Extend the profile model for approval readiness - What was added...
+
+The `Profile` model was extended so it could represent not just role labels, but also whether a teacher is actually approved to use teacher capabilities.
+
+Added / finalized fields and enums along these lines:
+
+- `AppRole`
+  - `student`
+  - `teacher`
+  - `admin`
+- `TeacherApprovalStatus`
+  - `not_applicable`
+  - `pending`
+  - `approved`
+  - `rejected`
+
+The profile model was also aligned to hold synced identity-facing fields used by admin/staff tooling such as:
+
+- `email`
+- `displayName`
+- `avatarUrl`
+
+TITLE Moallem Academy Web Implementation Log - Step 2 Extend the profile model for approval readiness - Why this matters...
+
+A role like `teacher` is not enough on its own for product authorization. The app needs to distinguish:
+
+- a normal student
+- a teacher waiting for approval
+- an active teacher
+- an admin
+
+Without this, any future teacher/admin/payment/media rules stay ambiguous and hard to enforce consistently.
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 3 Apply the schema change and regenerate Prisma client - Commands...
+
+```bash
+npx prisma migrate dev --name add_teacher_approval_and_profile_sync_fields
+npx prisma generate
+```
+
+TITLE Moallem Academy Web Implementation Log - Step 3 Apply the schema change and regenerate Prisma client - Why this matters...
+
+This persisted the new approval-capable profile shape to Neon and regenerated the typed Prisma client so the rest of the backend could start using the new fields safely.
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 4 Add Clerk webhook-based profile sync - Files created or updated...
+
+- `app/api/webhooks/clerk/route.ts`
+- `.env.local`
+- `middleware.ts` or `proxy.ts` (to ensure webhook route stays public)
+- package dependencies (`svix` if needed by the local setup)
+
+TITLE Moallem Academy Web Implementation Log - Step 4 Add Clerk webhook-based profile sync - What was implemented...
+
+A public Clerk webhook endpoint was added so Clerk can notify the app when users are:
+
+- created
+- updated
+- deleted
+
+The handler verifies the incoming webhook request, then forwards the event into shared profile mutation logic.
+
+Typical events handled:
+
+- `user.created`
+- `user.updated`
+- `user.deleted`
+
+The route stays public because Clerk must be able to call it from outside the app.
+
+TITLE Moallem Academy Web Implementation Log - Step 4 Add Clerk webhook-based profile sync - Why this matters...
+
+This removes the long-term dependence on manually creating `profiles` rows in Prisma Studio. After this step, Clerk identity and DB profile state start moving together automatically, which is the foundation for all truthful role-aware product flows.
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 5 Create shared profile mutations for webhook sync and admin role changes - Files created...
+
+- `lib/mutations/profile.ts`
+
+TITLE Moallem Academy Web Implementation Log - Step 5 Create shared profile mutations for webhook sync and admin role changes - What was added...
+
+Shared mutation functions were introduced for:
+
+- upserting a profile from Clerk webhook data
+- deleting a profile when the Clerk user is deleted
+- changing a profile role
+- approving a teacher
+- rejecting a teacher
+
+These functions intentionally keep role and approval truth app-managed rather than allowing Clerk profile metadata to silently become the main authority.
+
+TITLE Moallem Academy Web Implementation Log - Step 5 Create shared profile mutations for webhook sync and admin role changes - Why this matters...
+
+This keeps webhook behavior and admin-driven role/approval changes inside the agreed shared backend layer instead of putting DB writes directly inside route handlers or page components.
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 6 Create shared profile queries for admin/staff reads - Files created...
+
+- `lib/queries/profile.ts`
+
+TITLE Moallem Academy Web Implementation Log - Step 6 Create shared profile queries for admin/staff reads - What was added...
+
+Shared query helpers were added for:
+
+- getting a profile by Clerk user ID
+- listing profiles by role
+- listing pending teachers
+- listing teachers for admin review flows
+
+TITLE Moallem Academy Web Implementation Log - Step 6 Create shared profile queries for admin/staff reads - Why this matters...
+
+Admin/staff review pages and future mobile admin consumers need reusable read functions, not direct Prisma calls scattered across components or API routes.
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 7 Create the shared authorization layer - Files created...
+
+- `lib/access/roles.ts`
+- `lib/access/guards.ts`
+- `lib/access/playback.ts`
+
+TITLE Moallem Academy Web Implementation Log - Step 7 Create the shared authorization layer - What was implemented...
+
+Three access-focused modules were introduced:
+
+1. `lib/access/roles.ts`
+   - small pure helpers such as:
+     - `isAdmin(...)`
+     - `isApprovedTeacher(...)`
+     - `isPendingTeacher(...)`
+     - `isStudent(...)`
+
+2. `lib/access/guards.ts`
+   - server-side helpers that resolve the current Clerk session into the synced DB profile and enforce:
+     - authenticated profile required
+     - admin required
+     - approved teacher required
+     - student required
+
+3. `lib/access/playback.ts`
+   - shared lesson access logic that answers:
+     - may this profile access this lesson right now?
+
+TITLE Moallem Academy Web Implementation Log - Step 7 Create the shared authorization layer - Why this matters...
+
+This is the core of Feature 11. Instead of repeating ad-hoc role checks everywhere, the app now has one shared authorization language usable from pages, Server Actions, and Route Handlers.
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 8 Implement the shared lesson access / playback foundation - Files created or updated...
+
+- `lib/access/playback.ts`
+- `app/api/lessons/[lessonId]/access/route.ts`
+- `app/api/lessons/[lessonId]/playback-access/route.ts`
+- `app/api/lessons/[lessonId]/media/route.ts` (or equivalent lesson media route)
+- lesson watch/playback page(s)
+
+TITLE Moallem Academy Web Implementation Log - Step 8 Implement the shared lesson access / playback foundation - Rules enforced...
+
+The new shared lesson access logic was designed to check:
+
+- signed-in identity
+- synced DB profile
+- admin override if applicable
+- approved teacher ownership if the teacher owns the course
+- preview lesson allowance
+- confirmed student enrollment for paid/protected lessons
+
+Only after the access check passes should protected lesson media details be returned.
+
+TITLE Moallem Academy Web Implementation Log - Step 8 Implement the shared lesson access / playback foundation - Why this matters...
+
+This creates the first truthful backend enforcement layer for future protected playback. The player itself is not the source of truth; the backend authorization decision is.
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 9 Keep media URL generation separate from authorization - Files reviewed or updated...
+
+- `lib/queries/media.ts`
+
+TITLE Moallem Academy Web Implementation Log - Step 9 Keep media URL generation separate from authorization - What was confirmed...
+
+`lib/queries/media.ts` was kept as a media lookup / URL-generation utility rather than turning it into the place where role checks happen.
+
+The rule used was:
+
+1. authorize the actor first through shared lesson access checks
+2. only then generate or return the media response
+
+For Cloudinary-owned media, signed authenticated delivery URLs continue to be generated through the backend after authorization. For external links, the current preview/playback response returns the stored URL as the current fallback path.
+
+TITLE Moallem Academy Web Implementation Log - Step 9 Keep media URL generation separate from authorization - Why this matters...
+
+This keeps authorization logic centralized and avoids mixing media-provider-specific concerns with business access rules.
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 10 Add admin-facing teacher approval actions - Files created...
+
+- `actions/profile.ts`
+
+TITLE Moallem Academy Web Implementation Log - Step 10 Add admin-facing teacher approval actions - What was added...
+
+Thin Server Actions were added for admin-driven profile changes such as:
+
+- approve teacher
+- reject teacher
+- set role
+
+These actions call shared mutation logic and use backend admin guards before doing anything.
+
+TITLE Moallem Academy Web Implementation Log - Step 10 Add admin-facing teacher approval actions - Why this matters...
+
+Admin UI must not write to the database directly from components. It should go through thin actions that enforce admin authorization and then delegate the real write work to `lib/mutations/*`.
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 11 Add admin-facing teacher review UI - Files created or updated...
+
+- `app/[locale]/(admin)/admin/teachers/page.tsx`
+- admin teacher row/list components under shared project structure
+- `messages/ar.json`
+- `messages/en.json`
+
+TITLE Moallem Academy Web Implementation Log - Step 11 Add admin-facing teacher review UI - What was implemented...
+
+A teacher-management review surface was added for admin use using the shared shadcn-based UI system.
+
+The UI was built with shared components such as:
+
+- cards
+- badges
+- buttons
+- lists / rows
+- localized empty states and status labels
+
+Visible text such as:
+
+- page title
+- empty state
+- approval status labels
+- approve / reject actions
+
+was added to localization files instead of being hardcoded.
+
+TITLE Moallem Academy Web Implementation Log - Step 11 Add admin-facing teacher review UI - Why this matters...
+
+This turns teacher approval into a real product flow, not just a database-editing task in Prisma Studio.
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 12 Harden teacher/admin pages with real role-aware access checks - Files reviewed and updated...
+
+Teacher/admin pages were reviewed and guarded systematically, including routes such as:
+
+- `app/[locale]/(teacher)/teacher/page.tsx`
+- `app/[locale]/(teacher)/teacher/courses/new/page.tsx`
+- lesson management pages under the teacher section
+- `app/[locale]/(admin)/admin/teachers/page.tsx`
+- other admin payment/staff review pages
+
+TITLE Moallem Academy Web Implementation Log - Step 12 Harden teacher/admin pages with real role-aware access checks - What was discovered...
+
+Testing exposed an important security gap:
+
+- a plain signed-in student could still enter some teacher pages
+- a student could even create a course in some earlier teacher flows
+- only deeper lesson creation had already started enforcing approved-teacher access
+
+This confirmed that “logged in” was still being treated as enough in some places, which Feature 11 needed to fix.
+
+TITLE Moallem Academy Web Implementation Log - Step 12 Harden teacher/admin pages with real role-aware access checks - Why this matters...
+
+This review proved why Feature 11 was necessary: role-aware product enforcement must be systematic, not partial.
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 13 Apply the correct guard pattern to Server Actions - Files reviewed and updated...
+
+- `actions/course.ts`
+- `actions/lesson.ts`
+- `actions/media.ts`
+- `actions/payment.ts`
+- `actions/profile.ts`
+
+TITLE Moallem Academy Web Implementation Log - Step 13 Apply the correct guard pattern to Server Actions - Rules used...
+
+Server Actions were reviewed and protected based on the actual actor:
+
+- teacher mutations → approved teacher required
+- admin review/config mutations → admin required
+- student-owned request creation → student required
+- profile/approval actions → admin required
+
+The guiding rule used:
+
+- pages are not enough
+- every mutation entry point must enforce backend authorization directly
+
+TITLE Moallem Academy Web Implementation Log - Step 13 Apply the correct guard pattern to Server Actions - Why this matters...
+
+A user may bypass a page and still trigger an action indirectly. Server Actions must not assume the UI already protected them.
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 14 Apply the correct guard pattern to Route Handlers - Files reviewed and updated...
+
+All relevant Route Handlers under `app/api/` were classified by who should be allowed to call them.
+
+Examples reviewed:
+
+- public browse routes
+- Clerk webhook route
+- `app/api/profile/me/route.ts`
+- `app/api/payment/config/route.ts`
+- `app/api/payment/requests/route.ts`
+- `app/api/payment/requests/[requestId]/review/route.ts`
+- `app/api/cloudinary/upload-signature/route.ts`
+- all `app/api/teacher/*` routes
+- lesson access / lesson media routes
+
+TITLE Moallem Academy Web Implementation Log - Step 14 Apply the correct guard pattern to Route Handlers - Guard mapping used...
+
+- public webhook / browse routes
+  - no auth guard
+- authenticated-any-role routes
+  - authenticated profile required
+- student routes
+  - student required
+- teacher routes
+  - approved teacher required
+- admin routes
+  - admin required
+
+A key implementation rule used here:
+client-supplied IDs like `teacherId` must not be trusted for protected operations if the server already knows the current actor from Clerk + DB profile.
+
+TITLE Moallem Academy Web Implementation Log - Step 14 Apply the correct guard pattern to Route Handlers - Why this matters...
+
+Mobile and future external consumers use these routes directly. If Route Handlers are not protected, UI protections on the web side mean very little.
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 15 Review queries and mutations for ownership and caller safety - Files reviewed...
+
+- `lib/mutations/course.ts`
+- `lib/mutations/lesson.ts`
+- `lib/mutations/media.ts`
+- `lib/mutations/payment.ts`
+- `lib/queries/media.ts`
+- role-sensitive teacher/admin queries
+
+TITLE Moallem Academy Web Implementation Log - Step 15 Review queries and mutations for ownership and caller safety - What was confirmed...
+
+Not every query or mutation needed to be rewritten.
+
+Instead, the rule applied was:
+
+- role-sensitive callers must be guarded before reaching shared mutations/queries
+- shared mutations still keep important ownership checks where relevant
+- actor identity must be derived from the authenticated profile server-side, not taken from client form/body/query values
+
+For example, course mutations remained acceptable as long as:
+
+- the caller enforced approved-teacher access
+- the `teacherId` passed into the mutation came from `actor.clerkUserId`
+- ownership checks still scoped updates to the correct teacher-owned course
+
+TITLE Moallem Academy Web Implementation Log - Step 15 Review queries and mutations for ownership and caller safety - Why this matters...
+
+This kept Feature 11 focused and safe without forcing unnecessary refactors to every shared data function.
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 16 Improve page-level permission UX with forbidden handling - Files updated...
+
+- `next.config.ts` or `next.config.js`
+- `app/forbidden.tsx`
+- protected teacher/admin pages
+
+TITLE Moallem Academy Web Implementation Log - Step 16 Improve page-level permission UX with forbidden handling - What was implemented...
+
+Initially, a student visiting a teacher page caused the app to throw:
+
+- `UNAUTHORIZED: approved teacher role required`
+
+This was secure, but it surfaced through the generic unexpected error boundary, which looked like a crash.
+
+To fix that, page-level authorization denials were shifted toward proper forbidden handling:
+
+- enable the Next.js auth interrupt capability if needed by the project setup
+- add `app/forbidden.tsx`
+- use `forbidden()` in protected pages for expected authorization denials
+
+Route Handlers still return normal HTTP `401` / `403` JSON responses. This change was specifically for page UX.
+
+TITLE Moallem Academy Web Implementation Log - Step 16 Improve page-level permission UX with forbidden handling - Why this matters...
+
+Permission denial is an expected product state, not an application failure. Teacher/admin routes should render a proper 403-style experience rather than the global crash page.
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 17 Local verification used for Clerk sync and role-aware protection - Commands...
+
+```bash
+npm run dev
+npx prisma studio
+ngrok http 3000
+npx tsc --noEmit
+npm run build
+```
+
+TITLE Moallem Academy Web Implementation Log - Step 17 Local verification used for Clerk sync and role-aware protection - What was tested...
+
+- Clerk webhook endpoint successfully received events locally through ngrok
+- creating a new Clerk user created a matching `profiles` row automatically
+- updating the Clerk user updated synced profile fields
+- a plain student profile no longer had truthful teacher/admin rights
+- teacher/admin routes, actions, and Route Handlers were reviewed and guarded by role
+- pending teachers remained blocked from teacher-only capabilities
+- approved teachers could use teacher flows
+- admins could reach admin flows
+- lesson access endpoints now relied on shared access logic rather than “signed in only”
+- TypeScript and production build checks passed
+
+TITLE Moallem Academy Web Implementation Log - Step 17 Local verification used for Clerk sync and role-aware protection - Why this matters...
+
+This verification proved that Feature 11 is not just schema work. It actually connected Clerk identity, DB profile truth, and role-aware backend enforcement into one working path.
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 18 Commit the admin/staff foundation - Command...
+
+```bash
+git add .
+git commit -m "feat11 admin and staff management foundations"
+git push origin main
+```
+
+TITLE Moallem Academy Web Implementation Log - Step 18 Commit the admin/staff foundation - Why this matters...
+
+This saves the first truthful role-aware authorization foundation for the web app and prepares the codebase for Feature 12 protected media delivery and playback rules.
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Feature 11 completion checklist...
+
+- [x] Clerk users sync into the `profiles` table automatically
+- [x] `profiles` now functions as the app-level source of truth for role and approval state
+- [x] role-ready profile behavior is established for `student`, `teacher`, and `admin`
+- [x] teacher approval is modeled as a real admin-controlled state
+- [x] shared backend access helpers now exist for role and approval checks
+- [x] teacher/admin-sensitive pages were reviewed and hardened with real authorization
+- [x] Server Actions were reviewed and guarded by actor role
+- [x] Route Handlers were classified and guarded by actor role
+- [x] protected lesson/media access now has a centralized access-check foundation
+- [x] expected page-level authorization failures no longer have to fall into generic crash-style UI
+- [x] admin/staff UI additions use the shared shadcn-based component system
+- [x] new visible strings were added through localization files
+- [x] no new feature logic depends on “logged in only” without DB profile truth
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Notes for future features...
+
+- Feature 12 should build on the shared lesson/media access checks introduced here instead of reinventing playback rules per page or per client.
+- Cloudinary delivery remains the current owned-media path, but signed delivery alone is not the full protection model; authorization must continue to happen before media details are returned.
+- External media links remain a lower-trust fallback path and need final product-policy confirmation during playback work.
+- Teacher approval is now a real product concept, but the exact long-term admin/staff permission matrix can still evolve in later shared-operations features.
+- Any remaining old Supabase-specific assumptions around auth, roles, or data access should be removed if still found elsewhere in the project or docs. 

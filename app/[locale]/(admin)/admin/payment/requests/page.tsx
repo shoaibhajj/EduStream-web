@@ -4,8 +4,17 @@ import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { RequestReviewRow } from "./RequestReviewRow";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { requireAdmin } from "@/lib/access/guards";
+import { forbidden } from "next/navigation";
+import { getCurrentProfile } from "@/lib/access/guards";
+import { isAdmin } from "@/lib/access/roles";
 
 export default async function AdminPaymentRequestsPage() {
+  const profile = await getCurrentProfile();
+
+  if (!profile || !isAdmin(profile)) {
+    forbidden();
+  }
   const t = await getTranslations("Payment");
   const requests = await getAllPaymentRequests();
 

@@ -1,23 +1,17 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { getTeacherCourses } from "@/lib/queries/teacher";
+import { requireApprovedTeacher } from "@/lib/access/guards";
 
-export async function GET(request: NextRequest) {
-  const teacherId = request.nextUrl.searchParams.get("teacherId");
-
-  if (!teacherId) {
-    return NextResponse.json(
-      { error: "teacherId is required" },
-      { status: 400 }
-    );
-  }
-
+export async function GET() {
   try {
-    const courses = await getTeacherCourses(teacherId);
+    const actor = await requireApprovedTeacher();
 
-    return NextResponse.json({
-      courses,
-    });
-  } catch {
+    const courses = await getTeacherCourses(actor.clerkUserId);
+
+    return NextResponse.json({ courses });
+  } catch (error) {
+    console.error("[api/teacher/courses] Error:", error);
+
     return NextResponse.json(
       { error: "Failed to load teacher courses" },
       { status: 500 }

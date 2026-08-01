@@ -9,12 +9,14 @@ import { SectionCard } from "@/components/shared/SectionCard";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { ChevronRight } from "lucide-react";
+import { requireStudent } from "@/lib/access/guards";
 
 export default async function YearPage({
   params,
 }: {
   params: Promise<{ locale: string; yearId: string }>;
 }) {
+    await requireStudent();
   const { locale, yearId } = await params;
   const t = await getTranslations("Browse");
 

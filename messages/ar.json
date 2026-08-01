@@ -209,5 +209,20 @@
     "visibleToStudents": "ظاهر للطلاب",
     "myPaymentDetails": "معلومات الدفع الخاصة بي",
     "saveMyDetails": "حفظ معلوماتي"
+  },
+  "Admin": {
+    "Teachers": {
+      "title": "إدارة المعلمين",
+      "allTeachersHeading": "جميع المعلمين",
+      "emptyState": "لا يوجد معلمون مسجلون بعد",
+      "approve": "موافقة",
+      "reject": "رفض",
+      "status": {
+        "approved": "مفعّل",
+        "pending": "في الانتظار",
+        "rejected": "مرفوض",
+        "not_applicable": "—"
+      }
+    }
   }
 }

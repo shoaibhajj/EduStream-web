@@ -1,10 +1,11 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { generateSignedUploadParams } from "@/lib/cloudinary";
-
+import { requireApprovedTeacher } from "@/lib/access/guards";
 export async function GET() {
-  const { userId } = await auth();
-  if (!userId) {
+  const actor = await requireApprovedTeacher();
+
+  if (!actor.clerkUserId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

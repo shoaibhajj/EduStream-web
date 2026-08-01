@@ -1,8 +1,10 @@
 import { currentUser } from "@clerk/nextjs/server";
 import { getTranslations } from "next-intl/server";
 import { SectionCard } from "@/components/shared/SectionCard";
+import { requireStudent } from "@/lib/access/guards";
 
 export default async function StudentPage() {
+    await requireStudent();
   const user = await currentUser();
   const t = await getTranslations("StudentDashboard");
 

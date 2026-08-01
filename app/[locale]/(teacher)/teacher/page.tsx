@@ -1,20 +1,27 @@
 import Link from "next/link";
 import { currentUser } from "@clerk/nextjs/server";
-import { redirect } from "next/navigation";
+import { forbidden, redirect } from "next/navigation";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { getTeacherCourses } from "@/lib/queries/teacher";
 import { TeacherCourseList } from "@/components/teacher/TeacherCourseList";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { buttonVariants } from "@/components/ui/button";
+import { getCurrentProfile, requireApprovedTeacher } from "@/lib/access/guards";
+import { isAdmin, isApprovedTeacher } from "@/lib/access/roles";
 
-export default async function TeacherPage() {
+export default async function TeacherPage() 
+{  
   const user = await currentUser();
   const locale = await getLocale();
   const t = await getTranslations("TeacherDashboard");
-
+  
   if (!user) {
     redirect(`/${locale}/sign-in`);
+  }
+  const profile = await getCurrentProfile();
+  if (!profile || (!isApprovedTeacher(profile) && !isAdmin(profile))) {
+    forbidden();
   }
 
   const courses = await getTeacherCourses(user.id);

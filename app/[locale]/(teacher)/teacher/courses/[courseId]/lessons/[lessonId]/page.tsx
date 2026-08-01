@@ -8,12 +8,20 @@ import { SectionCard } from "@/components/shared/SectionCard";
 import { buttonVariants } from "@/components/ui/button";
 import { LessonMediaManager } from "@/components/teacher/LessonMediaManager";
 import { getMediaPreviewUrl } from "@/lib/queries/media";
-
+import { requireApprovedTeacher } from "@/lib/access/guards";
+import { forbidden } from "next/navigation";
+import { getCurrentProfile } from "@/lib/access/guards";
+import { isAdmin, isApprovedTeacher } from "@/lib/access/roles";
 type Props = {
   params: Promise<{ locale: string; courseId: string; lessonId: string }>;
 };
 
 export default async function TeacherLessonDetailsPage({ params }: Props) {
+ const profile = await getCurrentProfile();
+
+ if (!profile || (!isApprovedTeacher(profile) && !isAdmin(profile))) {
+   forbidden();
+ }
   const { locale, courseId, lessonId } = await params;
   const user = await currentUser();
   if (!user) redirect(`/${locale}/sign-in`);

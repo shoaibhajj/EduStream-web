@@ -7,14 +7,15 @@ import {
   deleteLessonForTeacher,
   updateLessonForTeacher,
 } from "@/lib/mutations/lesson";
+import { requireApprovedTeacher } from "@/lib/access/guards";
 
 type Context = {
   params: Promise<{ courseId: string; lessonId: string }>;
 };
 
 export async function GET(_: Request, { params }: Context) {
-  const { userId } = await auth();
-  if (!userId) {
+  const actor = await requireApprovedTeacher();
+  if (!actor.clerkUserId) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
@@ -24,7 +25,7 @@ export async function GET(_: Request, { params }: Context) {
     where: {
       id: lessonId,
       courseId,
-      course: { teacherId: userId },
+      course: { teacherId: actor.clerkUserId },
     },
     include: { media: true },
   });
@@ -37,8 +38,8 @@ export async function GET(_: Request, { params }: Context) {
 }
 
 export async function PATCH(request: Request, { params }: Context) {
-  const { userId } = await auth();
-  if (!userId) {
+const actor = await requireApprovedTeacher();
+  if (!actor.clerkUserId) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
@@ -66,7 +67,7 @@ export async function PATCH(request: Request, { params }: Context) {
     const lesson = await updateLessonForTeacher(
       lessonId,
       courseId,
-      userId,
+      actor.clerkUserId,
       parsed.data
     );
     return NextResponse.json({ data: lesson });
@@ -77,15 +78,15 @@ export async function PATCH(request: Request, { params }: Context) {
 }
 
 export async function DELETE(_: Request, { params }: Context) {
-  const { userId } = await auth();
-  if (!userId) {
+const actor = await requireApprovedTeacher();
+  if (!actor.clerkUserId) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   const { courseId, lessonId } = await params;
 
   try {
-    await deleteLessonForTeacher(lessonId, courseId, userId);
+    await deleteLessonForTeacher(lessonId, courseId, actor.clerkUserId);
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("[api] delete lesson", error);
