@@ -4,6 +4,9 @@ import { prisma } from "@/lib/prisma";
 import { PaymentRequestForm } from "./PaymentRequestForm";
 import { requireStudent } from "@/lib/access/guards";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export default async function PaymentRequestPage() {
     await requireStudent();
   const { userId } = await auth();

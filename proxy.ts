@@ -12,7 +12,6 @@ const isPublicRoute = createRouteMatcher([
 const isProtectedRoute = createRouteMatcher([
   "/:locale/teacher(.*)",
   "/:locale/admin(.*)",
-  "/:locale/course(.*)",
   "/:locale/payment(.*)",
   "/api/profile(.*)",
   "/api/payment(.*)",

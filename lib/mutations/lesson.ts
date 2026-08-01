@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import type { CreateLessonInput } from "@/lib/validations/lesson";
-import { deleteLessonMedia } from "@/lib/mutations/media";
+import { deleteLessonMedia } from "./media";
 export async function createLessonForTeacher(
   input: CreateLessonInput,
   clerkUserId: string

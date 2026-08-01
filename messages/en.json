@@ -158,7 +158,8 @@
     "editLesson": "Edit lesson",
     "editLessonNow": "Edit lesson now",
     "deleteLesson": "Delete lesson",
-    "deleteFailed": "Failed to delete lesson, please try again"
+    "deleteFailed": "Failed to delete lesson, please try again",
+    "confirmDeleteLesson": "Are you sure you want to delete this lesson?"
   },
   "Payment": {
     "globalInstructions": "Payment Instructions",
@@ -224,5 +225,13 @@
         "not_applicable": "—"
       }
     }
+  },
+  "Playback": {
+    "backToCourse": "Back to course",
+    "lockedSignIn": "Please sign in to watch this lesson",
+    "lockedNoAccess": "This lesson requires an active subscription or course enrollment",
+    "noMedia": "No video source has been added to this lesson yet",
+    "externalLinkNotice": "This video is hosted on an external service. Protection is lower than for directly uploaded content.",
+    "errorLoad": "Failed to load lesson, please try again"
   }
 }

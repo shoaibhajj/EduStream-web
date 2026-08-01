@@ -1,5 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { cloudinary } from "@/lib/cloudinary";
+import { canAccessLesson, PlaybackAuthResult } from "@/lib/access/playback";
+import type { Profile } from "@/lib/generated/prisma";
+
 
 export async function getLessonMediaByLessonId(lessonId: string) {
   return prisma.lessonMedia.findUnique({ where: { lessonId } });
@@ -44,4 +47,50 @@ export async function getProtectedPlaybackUrl(lessonId: string): Promise<{
 
 export async function getMediaPreviewUrl(lessonId: string) {
   return getProtectedPlaybackUrl(lessonId);
+}
+
+
+
+
+
+export type PlaybackResponse =
+  | {
+      allowed: true;
+      type: "cloudinary" | "external_link";
+      url: string;
+      isOwned: boolean;
+      externalNotice: boolean;
+    }
+  | { allowed: false; reason: string };
+
+/**
+ * The single shared function for resolving lesson playback.
+ * Checks access first, then returns media URL only if authorized.
+ * Call this from both web Server Components AND Route Handlers (mobile).
+ */
+export async function resolvePlaybackAccess(
+  profile: Profile | null,
+  lessonId: string
+): Promise<PlaybackResponse> {
+  const authResult: PlaybackAuthResult = await canAccessLesson(
+    profile,
+    lessonId
+  );
+
+  if (!authResult.allowed) {
+    return { allowed: false, reason: authResult.reason ?? "denied" };
+  }
+
+  const media = await getProtectedPlaybackUrl(lessonId);
+  if (!media) {
+    return { allowed: false, reason: "no_media" };
+  }
+
+  return {
+    allowed: true,
+    type: media.type,
+    url: media.url,
+    isOwned: media.isOwned,
+    externalNotice: !media.isOwned, // true for external links — UI should show honest notice
+  };
 }

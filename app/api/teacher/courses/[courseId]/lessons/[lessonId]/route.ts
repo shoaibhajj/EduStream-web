@@ -89,7 +89,14 @@ const actor = await requireApprovedTeacher();
     await deleteLessonForTeacher(lessonId, courseId, actor.clerkUserId);
     return NextResponse.json({ success: true });
   } catch (error) {
+    const message = error instanceof Error ? error.message : "UNKNOWN_ERROR";
+    if (message === "LESSON_NOT_FOUND") {
+      return NextResponse.json({ error: "lesson_not_found" }, { status: 404 });
+    }
     console.error("[api] delete lesson", error);
     return NextResponse.json({ error: "server_error" }, { status: 500 });
   }
 }
+
+
+

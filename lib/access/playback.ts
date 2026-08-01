@@ -2,27 +2,35 @@ import { prisma } from "@/lib/prisma";
 import type { Profile } from "@/lib/generated/prisma";
 import { isAdmin, isApprovedTeacher } from "./roles";
 
-interface PlaybackAuthResult {
+export type PlaybackDeniedReason =
+  | "lesson_not_found_or_unpublished"
+  | "unauthenticated"
+  | "no_confirmed_enrollment"
+  | "no_media";
+
+export interface PlaybackAuthResult {
   allowed: boolean;
-  reason?: string;
+  reason?: PlaybackDeniedReason | string;
 }
 
 /**
  * Shared playback authorization check.
- * Usable from web Server Components, Server Actions, and API Route Handlers (mobile).
+ * Pass profile=null for unauthenticated visitors.
+ * Usable from Server Components, Server Actions, and Route Handlers (mobile).
  *
- * Rules:
- * - Admin: always allowed
- * - Approved teacher who owns the course: allowed
- * - Student with confirmed enrollment: allowed
- * - Preview lesson: allowed for all signed-in users
- * - Everything else: denied
+ * Rules (in priority order):
+ * 1. Lesson must exist and be published
+ * 2. Admin → always allowed
+ * 3. Preview lesson → allowed for everyone including unauthenticated
+ * 4. Approved teacher who owns the course → allowed
+ * 5. Student with hasActiveSubscription → allowed
+ * 6. Student with confirmed course enrollment → allowed
+ * 7. Otherwise → denied
  */
 export async function canAccessLesson(
-  profile: Profile,
+  profile: Profile | null,
   lessonId: string
 ): Promise<PlaybackAuthResult> {
-  // 1. Fetch lesson with parent course
   const lesson = await prisma.lesson.findUnique({
     where: { id: lessonId },
     include: { course: true },
@@ -32,13 +40,16 @@ export async function canAccessLesson(
     return { allowed: false, reason: "lesson_not_found_or_unpublished" };
   }
 
-  // 2. Admin always allowed
-  if (isAdmin(profile)) return { allowed: true };
-
-  // 3. Preview lessons: any signed-in user
+  // Preview: open to everyone including unauthenticated visitors
   if (lesson.isPreview) return { allowed: true };
 
-  // 4. Approved teacher who owns the course
+  // From here on, a profile is required
+  if (!profile) {
+    return { allowed: false, reason: "unauthenticated" };
+  }
+
+  if (isAdmin(profile)) return { allowed: true };
+
   if (
     isApprovedTeacher(profile) &&
     lesson.course.teacherId === profile.clerkUserId
@@ -46,7 +57,10 @@ export async function canAccessLesson(
     return { allowed: true };
   }
 
-  // 5. Student with confirmed enrollment
+  // All-platform subscription
+  if (profile.hasActiveSubscription) return { allowed: true };
+
+  // Course-specific confirmed enrollment
   const enrollment = await prisma.enrollment.findUnique({
     where: {
       profileId_courseId: {

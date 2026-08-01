@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { Geist, Roboto_Slab } from "next/font/google";
 import { cn } from "@/lib/utils";
+import { ClerkProvider } from "@clerk/nextjs";
 
 const robotoSlab = Roboto_Slab({subsets:['latin'],variable:'--font-serif'});
 
@@ -18,8 +19,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html suppressHydrationWarning className={cn( geist.variable, "font-serif", robotoSlab.variable)}>
-      <body>{children}</body>
-    </html>
+    <ClerkProvider>
+      <html
+        suppressHydrationWarning
+        className={cn(geist.variable, "font-serif", robotoSlab.variable)}
+      >
+        <body>{children}</body>
+      </html>
+    </ClerkProvider>
   );
 }

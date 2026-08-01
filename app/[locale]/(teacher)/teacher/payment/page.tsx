@@ -7,6 +7,9 @@ import { forbidden } from "next/navigation";
 import { getCurrentProfile } from "@/lib/access/guards";
 import { isAdmin, isApprovedTeacher } from "@/lib/access/roles";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export default async function TeacherPaymentPage() {
 const profile = await getCurrentProfile();
 

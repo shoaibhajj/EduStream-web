@@ -12,14 +12,12 @@ import { ErrorState } from "@/components/shared/ErrorState";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { requireStudent } from "@/lib/access/guards";
 
 export default async function SubjectCoursesPage({
   params,
 }: {
   params: Promise<{ locale: string; yearId: string; subjectId: string }>;
 }) {
-    await requireStudent();
   const { locale, yearId, subjectId } = await params;
   const t = await getTranslations("Browse");
 

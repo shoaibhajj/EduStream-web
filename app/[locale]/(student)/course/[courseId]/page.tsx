@@ -12,19 +12,19 @@ import { SectionCard } from "@/components/shared/SectionCard";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { StatusBadge } from "@/components/shared/StatusBadge";
-import { Button, buttonVariants } from "@/components/ui/button";
+import {  buttonVariants } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
-import {  requireStudent } from "@/lib/access/guards";
+import Image from "next/image";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 export default async function CourseDetailPage({
   params,
 }: {
   params: Promise<{ locale: string; courseId: string }>;
 }) {
-
-      await requireStudent();
   const { locale, courseId } = await params;
   const t = await getTranslations("CourseDetail");
 
@@ -33,6 +33,13 @@ export default async function CourseDetailPage({
 
   try {
     course = await getCourseDetail(courseId);
+    console.log("[CourseDetailPage] requested courseId:", courseId);
+    console.log("[CourseDetailPage] course found:", !!course);
+
+    if (!loadError && !course) {
+      console.log("[CourseDetailPage] notFound for courseId:", courseId);
+      notFound();
+    }
   } catch (error) {
     console.error("[CourseDetailPage] load error:", error);
     loadError = true;
@@ -89,7 +96,9 @@ export default async function CourseDetailPage({
           {/* Course header */}
           <SectionCard className="mb-6">
             {course!.thumbnailUrl && (
-              <img
+              <Image
+                width={100}
+                height={100}
                 src={course!.thumbnailUrl}
                 alt=""
                 className="mb-5 w-full rounded-lg object-cover aspect-video"
@@ -165,6 +174,8 @@ export default async function CourseDetailPage({
                       key={lesson.id}
                       titleAr={lesson.titleAr}
                       titleEn={lesson.titleEn}
+                      lessonId={lesson.id}
+                      courseId={course!.id}
                       accessState={accessState}
                       locale={locale}
                       sortOrder={index + 1}

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { Lock, PlayCircle, Eye } from "lucide-react";
 import { StatusBadge } from "@/components/shared/StatusBadge";
@@ -5,6 +6,8 @@ import { StatusBadge } from "@/components/shared/StatusBadge";
 type LessonAccessState = "preview" | "accessible" | "locked";
 
 interface LessonRowProps {
+  lessonId: string;
+  courseId: string;
   titleAr: string;
   titleEn: string | null;
   accessState: LessonAccessState;
@@ -13,6 +16,8 @@ interface LessonRowProps {
 }
 
 export function LessonRow({
+  lessonId,
+  courseId,
   titleAr,
   titleEn,
   accessState,
@@ -33,9 +38,11 @@ export function LessonRow({
   };
 
   const badge = badgeConfig[accessState];
+  const isPlayable = accessState === "preview" || accessState === "accessible";
+  const href = `/${locale}/course/${courseId}/lesson/${lessonId}`;
 
-  return (
-    <li className="flex items-center justify-between gap-3 rounded-lg border border-border bg-surface px-4 py-3">
+  const inner = (
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-surface px-4 py-3 w-full">
       <div className="flex items-center gap-3 min-w-0">
         <span className="text-sm text-text-muted w-6 shrink-0 text-center">
           {sortOrder}
@@ -53,6 +60,18 @@ export function LessonRow({
         label={badge.label}
         icon={badge.icon}
       />
-    </li>
+    </div>
   );
+
+  if (isPlayable) {
+    return (
+      <li>
+        <Link href={href} className="block hover:opacity-90 transition-opacity">
+          {inner}
+        </Link>
+      </li>
+    );
+  }
+
+  return <li>{inner}</li>;
 }

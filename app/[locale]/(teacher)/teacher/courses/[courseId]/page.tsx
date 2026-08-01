@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { currentUser } from "@clerk/nextjs/server";
-import { notFound, redirect } from "next/navigation";
+import { notFound, redirect, forbidden } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 
 import {
@@ -10,12 +10,13 @@ import {
 import { SectionCard } from "@/components/shared/SectionCard";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { deleteLessonAction } from "@/actions/lesson";
-import { requireApprovedTeacher } from "@/lib/access/guards";
-import { forbidden } from "next/navigation";
+// import { deleteLessonAction } from "@/actions/lesson";
 import { getCurrentProfile } from "@/lib/access/guards";
 import { isAdmin, isApprovedTeacher } from "@/lib/access/roles";
+import { DeleteLessonButton } from "@/components/teacher/DeleteLessonButton";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 type Props = {
   params: Promise<{ locale: string; courseId: string }>;
   searchParams: Promise<{ deleteError?: string }>;
@@ -173,13 +174,13 @@ export default async function TeacherCourseDetailsPage({
                       {tLessons("editLesson")}
                     </Link>
 
-                    <form action={deleteLessonAction}>
-                      <input type="hidden" name="courseId" value={courseId} />
-                      <input type="hidden" name="lessonId" value={lesson.id} />
-                      <Button type="submit" variant="destructive">
-                        {tLessons("deleteLesson")}
-                      </Button>
-                    </form>
+                    <DeleteLessonButton
+                      locale={locale}
+                      courseId={courseId}
+                      lessonId={lesson.id}
+                      label={tLessons("deleteLesson")}
+                      confirmMessage={tLessons("confirmDeleteLesson")}
+                    />
                   </div>
                 </div>
               </SectionCard>

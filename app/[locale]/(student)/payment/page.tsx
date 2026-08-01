@@ -9,6 +9,10 @@ import { buttonVariants } from "@/components/ui/button";
 import { Link } from "@/i18n/navigation";
 import { requireStudent } from "@/lib/access/guards";
 
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export default async function PaymentInstructionsPage({
   searchParams,
 }: {

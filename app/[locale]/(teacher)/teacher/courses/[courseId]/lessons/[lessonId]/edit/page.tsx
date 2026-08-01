@@ -13,6 +13,9 @@ type Props = {
   params: Promise<{ locale: string; courseId: string; lessonId: string }>;
 };
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export default async function EditTeacherLessonPage({ params }: Props) {
    const profile = await getCurrentProfile();
 
