@@ -10,9 +10,9 @@ import {
 import { deleteLessonForTeacher } from "@/lib/mutations/lesson";
 import { requireApprovedTeacher } from "@/lib/access/guards";
 
-const actor = await requireApprovedTeacher();
-export async function createLessonAction(formData: FormData) {
 
+export async function createLessonAction(formData: FormData) {
+const actor = await requireApprovedTeacher();
 
   if (!actor.clerkUserId) {
     return { error: "unauthorized" };
@@ -48,7 +48,7 @@ export async function createLessonAction(formData: FormData) {
 }
 
 export async function updateLessonAction(formData: FormData) {
-
+const actor = await requireApprovedTeacher();
   if (!actor.clerkUserId) return { error: "unauthorized" };
 
   const lessonId = String(formData.get("lessonId") ?? "");
@@ -81,7 +81,7 @@ export async function updateLessonAction(formData: FormData) {
 }
 
 export async function deleteLessonAction(formData: FormData): Promise<void> {
-  
+  const actor = await requireApprovedTeacher();
 
   const lessonId = String(formData.get("lessonId") ?? "");
   const courseId = String(formData.get("courseId") ?? "");

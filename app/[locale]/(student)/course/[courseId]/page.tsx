@@ -12,11 +12,13 @@ import { SectionCard } from "@/components/shared/SectionCard";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { StatusBadge } from "@/components/shared/StatusBadge";
-import {  buttonVariants } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Image from "next/image";
+import { isAdmin, isApprovedTeacher } from "@/lib/access/roles";
+import { Profile } from "@/lib/generated/prisma";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -49,12 +51,29 @@ export default async function CourseDetailPage({
 
   const { userId: clerkUserId } = await auth();
   let enrollmentStatus = "none";
+  type CourseAccessProfile = Pick<
+    Profile,
+    | "id"
+    | "clerkUserId"
+    | "role"
+    | "teacherApprovalStatus"
+    | "hasActiveSubscription"
+  >;
+
+  let profileRef: CourseAccessProfile | null = null;
   if (clerkUserId && course) {
     try {
       const profile = await prisma.profile.findUnique({
         where: { clerkUserId },
-        select: { id: true },
+        select: {
+          id: true,
+          clerkUserId: true,
+          role: true,
+          teacherApprovalStatus: true,
+          hasActiveSubscription: true,
+        },
       });
+      profileRef = profile;
       if (profile) {
         const enrollment = await getStudentEnrollmentForCourse(
           profile.id,
@@ -69,7 +88,13 @@ export default async function CourseDetailPage({
     }
   }
 
-  const hasFullAccess = enrollmentStatus === "confirmed";
+  const hasFullAccess =
+    !!profileRef &&
+      (isAdmin(profileRef) ||
+        (isApprovedTeacher(profileRef) &&
+        course!.teacherId === profileRef.clerkUserId) ||
+      profileRef.hasActiveSubscription ||
+      enrollmentStatus === "confirmed");
 
   const courseName =
     locale === "ar" ? course?.nameAr : course?.nameEn ?? course?.nameAr;

@@ -22,13 +22,13 @@ import {
   requireStudent,
   requireApprovedTeacher,
 } from "@/lib/access/guards";
-const actor = await requireAdmin();
-const studentActor = await requireStudent();
-const teacherActor = await requireApprovedTeacher();
+
+
+
 // ── Admin: Update global payment config ─────────────────────────────────────
 
 export async function updatePaymentConfigAction(formData: unknown) {
-
+const actor = await requireAdmin();
   if (!actor.clerkUserId) throw new Error("Unauthorized");
 
   const profile = await prisma.profile.findUnique({
@@ -46,7 +46,7 @@ export async function updatePaymentConfigAction(formData: unknown) {
 // ── Student: Submit a payment request ───────────────────────────────────────
 
 export async function createPaymentRequestAction(formData: unknown) {
-
+const studentActor = await requireStudent();
   if (!studentActor.clerkUserId) throw new Error("Unauthorized");
 
   const profile = await prisma.profile.findUnique({
@@ -64,7 +64,7 @@ export async function createPaymentRequestAction(formData: unknown) {
 // ── Admin: Approve or reject a request ──────────────────────────────────────
 
 export async function reviewPaymentRequestAction(formData: unknown) {
- 
+ const actor = await requireAdmin();
   if (!actor.clerkUserId) throw new Error("Unauthorized");
 
   const profile = await prisma.profile.findUnique({
@@ -91,7 +91,7 @@ export async function upsertMyTeacherPaymentDetailAction(formData: {
   whatsappNumber?: string;
   qrImageUrl?: string;
 }) {
-
+const teacherActor = await requireApprovedTeacher();
   if (!teacherActor.clerkUserId) throw new Error("Unauthorized");
 
   await upsertMyTeacherPaymentDetail({
@@ -106,7 +106,7 @@ export async function setTeacherPaymentVisibilityAction(input: {
   teacherClerkId: string;
   visible: boolean;
 }) {
-
+const actor = await requireAdmin();
   if (!actor.clerkUserId) throw new Error("Unauthorized");
   const profile = await prisma.profile.findUnique({
     where: { clerkUserId: actor.clerkUserId },

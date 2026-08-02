@@ -14,7 +14,7 @@ import {
 } from "@/lib/validations/course";
 import { requireApprovedTeacher } from "@/lib/access/guards";
 
-const actor = await requireApprovedTeacher();
+
 
 function toOptionalString(value: FormDataEntryValue | null) {
   if (typeof value !== "string") return "";
@@ -22,7 +22,7 @@ function toOptionalString(value: FormDataEntryValue | null) {
 }
 
 export async function createCourseAction(formData: FormData) {
-
+const actor = await requireApprovedTeacher();
 
   if (!actor.clerkUserId) {
     return {
@@ -59,7 +59,7 @@ export async function createCourseAction(formData: FormData) {
 }
 
 export async function updateCourseAction(formData: FormData) {
-
+const actor = await requireApprovedTeacher();
 
   if (!actor.clerkUserId) {
     return {
@@ -103,7 +103,7 @@ export async function setCoursePublishStateAction(input: {
   isPublished: boolean;
 }) {
 
-
+const actor = await requireApprovedTeacher();
   if (!actor.clerkUserId) {
     return {
       success: false,

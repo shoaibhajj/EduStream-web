@@ -13,9 +13,10 @@ import {
 } from "@/lib/validations/media";
 import { requireApprovedTeacher } from "@/lib/access/guards";
 
-const actor = await requireApprovedTeacher();
+
 
 export async function saveCloudinaryMediaAction(formData: FormData) {
+  const actor = await requireApprovedTeacher();
   if (!actor.clerkUserId) return { error: "unauthorized" };
 
   const raw = {
@@ -41,7 +42,7 @@ export async function saveCloudinaryMediaAction(formData: FormData) {
 }
 
 export async function saveExternalLinkMediaAction(formData: FormData) {
-
+const actor = await requireApprovedTeacher();
   if (!actor.clerkUserId) return { error: "unauthorized" };
 
   const raw = {
@@ -63,6 +64,7 @@ export async function saveExternalLinkMediaAction(formData: FormData) {
 }
 
 export async function deleteLessonMediaAction(lessonId: string) {
+  const actor = await requireApprovedTeacher();
   if (!actor.clerkUserId) return { error: "unauthorized" };
 
   try {

@@ -1,8 +1,8 @@
 ## Current Status
 Phase: Phase 3 — Shared Product Operations
-Current Goal: Formalize shared app-level identity, role enforcement, teacher approval, and backend access rules so admin/teacher/student behavior is driven by DB truth and reusable across web and future mobile consumers
-Last completed: 11 — Admin and Staff Management Foundations
-Next up: 12 — Shared Media Delivery, Protection, and Playback Rules
+Current Goal: Formalize shared app-level identity, role enforcement, teacher approval, backend access rules, and now shared playback/media-delivery behavior so admin/teacher/student lesson access is driven by DB truth and reusable across web and future mobile consumers
+Last completed: 12 — Shared Media Delivery, Protection, and Playback Rules
+Next up: 13 — Cross-Platform Data and Role Alignment Review
 
 
 
@@ -30,7 +30,7 @@ Next up: 12 — Shared Media Delivery, Protection, and Playback Rules
 
 ### Phase 3 — Shared Product Operations
 - [x] 11 — Admin and Staff Management Foundations
-- [ ] 12 — Shared Media Delivery, Protection, and Playback Rules
+- [x] 12 — Shared Media Delivery, Protection, and Playback Rules
 - [ ] 13 — Cross-Platform Data and Role Alignment Review
 
 
@@ -53,10 +53,12 @@ Next up: 12 — Shared Media Delivery, Protection, and Playback Rules
 - Confirm how preview/free-lesson media should be modeled across uploaded and linked content now that lesson media is provider-aware.
 - Confirm whether student playback should ever expose raw external links directly, or whether externally linked media must always be wrapped in a controlled player surface.
 - Confirm final product policy for lesson publishability: whether lessons may exist without media indefinitely, or whether a later rule should block publishing/access until a media source is attached.
-- Confirm whether a shared media service abstraction should now be introduced before Feature 12 so future providers and playback rules do not spread Cloudinary-specific logic across multiple files.
+- Confirm whether a shared media service abstraction should now be introduced before Feature 13 so future providers and playback rules do not spread Cloudinary-specific logic across multiple files.
 - Confirm whether teacher/mobile clients should continue using the existing `/api/cloudinary/upload-signature` route, or whether that should be namespaced to a dedicated teacher/mobile media route for long-term clarity.
 - Confirm whether all-platform subscription approval should remain a `Profile.hasActiveSubscription` flag long-term, or later evolve into a dedicated subscription/access model shared across platforms.
 - Confirm whether teacher-specific payment details should remain per-teacher only, or later support per-course overrides for teachers who need different payment instructions by course.
+- Confirm the product policy for external video providers such as Google Drive, MEGA, and TeraBox: whether they should be unsupported as raw links, transformed through a provider-aware delivery layer, or rendered only through explicit embed-compatible flows.
+- Confirm whether the app should validate external media URLs at save-time so non-playable share-page links are rejected before they reach student playback surfaces.
 
 
 
@@ -167,7 +169,6 @@ Next up: 12 — Shared Media Delivery, Protection, and Playback Rules
 - Feature 10 added payment-focused read/query helpers in `lib/queries/payment.ts`, thin web-triggered Server Actions in `actions/payment.ts`, and mobile/future-consumer Route Handlers under `app/api/payment/*`, preserving the established cross-platform architecture instead of burying logic in web-only code.
 - Feature 10 added localized Arabic-first student/admin/teacher payment surfaces using the shared shadcn-based design system, including a global admin payment config page, teacher self-service payment page, admin teacher-payment visibility review page, student payment instructions page, student request form, and admin request review list.
 - Feature 10 also surfaced a temporary implementation reality: until Feature 11 formalizes role assignment/admin controls, local verification may still rely on direct `Profile.role` edits in Prisma Studio for admin/teacher testing.
-
 - Feature 11 formalized the app-level identity bridge: Clerk remains the authentication provider, while the `profiles` table in Neon/Prisma is now the source of truth for app-level role, approval, and shared authorization decisions.
 - Feature 11 adopted Clerk webhooks as the long-term profile-sync mechanism, replacing any manual-profile-creation assumption with idempotent Clerk-to-database synchronization for user create/update/delete events.
 - Feature 11 confirmed that app authorization must not depend on Clerk auth presence alone; all meaningful role checks must resolve the synced DB profile first.
@@ -188,6 +189,14 @@ Next up: 12 — Shared Media Delivery, Protection, and Playback Rules
 - Feature 11 preserved Cloudinary as the current owned-media provider while explicitly separating media authorization from media URL generation: backend access checks happen first, then protected/signed media delivery details may be returned.
 - Feature 11 added a real admin-facing teacher management foundation using the shared shadcn-based UI layer and localization discipline, rather than temporary role truth living only in Prisma Studio edits.
 - Feature 11 keeps localization discipline intact for newly introduced role/approval/admin-management UI, with Arabic-first defaults, English parity, and RTL-safe layouts preserved.
+- Feature 12 unified playback authorization around a shared `canAccessLesson(...)` rule so preview playback, protected lesson playback, admin access, teacher-owner access, subscription access, and confirmed-enrollment access all resolve from one backend truth.
+- Feature 12 confirmed the lesson player page and mobile-facing playback-access route both use the centralized authorization decision before returning playable media details, keeping backend truth aligned across web and future mobile consumers.
+- Feature 12 surfaced and resolved a real UI/backend mismatch: the course detail page was still showing some lessons as locked because its badge logic only checked confirmed enrollment, while the actual player access layer already correctly allowed admins, owning teachers, and subscribed students.
+- Feature 12 fixed the course detail page to compute full-access state from the same rule family as playback, so preview/access/lock states now mirror the backend access model instead of drifting into page-local logic.
+- Feature 12 also clarified an implementation rule for future protected media work: access checks should live in shared backend helpers, while pages only mirror or present those results and must not invent separate authorization policies.
+- Feature 12 exposed an important provider-specific playback limitation for externally linked media: some raw Google Drive, MEGA, and TeraBox links can render a blank/dark HTML5 video element without actual playback because they are share-page URLs or otherwise not reliable browser-playable direct media streams.
+- Feature 12 therefore established a follow-up product/technical requirement: external media playback must become provider-aware, with explicit validation and possibly provider-specific embed or stream handling, instead of assuming every saved external URL is safe to feed directly into the native browser video player.
+- Feature 12 keeps Cloudinary-owned uploads as the most reliable protected playback path today, while leaving the external-link playback-hardening work as an explicit next-feature follow-up rather than an undocumented known issue.
 
 
 
@@ -258,3 +267,11 @@ Next up: 12 — Shared Media Delivery, Protection, and Playback Rules
 - Feature 11 established the first shared playback/access-control foundation by centralizing lesson-access checks that future protected media delivery and playback routes can reuse across web and mobile consumers.
 - Local verification for Feature 11 confirmed Clerk webhook sync works with ngrok during development, profile records are created/updated correctly, and role-aware protection is now active across the protected teacher/admin surfaces that were reviewed.
 - Next implementation focus should now shift to Feature 12 (shared media delivery, protection, and playback rules), building on the role-aware identity and access-control foundation completed in Feature 11.
+- Feature 12 is now complete.
+- Feature 12 unified lesson playback access rules across the course detail page, lesson player page, and playback-access route so UI badges and actual playback permissions now use the same backend truth.
+- Feature 12 established a shared `canAccessLesson(...)` authorization rule that supports preview lessons, admins, approved owning teachers, subscribed students, and confirmed enrollments in one place.
+- Feature 12 fixed the course detail lesson list so non-preview lessons now reflect subscription, teacher ownership, admin access, and confirmed enrollment correctly instead of only checking confirmed enrollment.
+- Feature 12 confirmed the lesson player route is the authoritative access layer for protected playback while the course detail page is the display layer that mirrors those rules.
+- Feature 12 also surfaced a media-provider limitation: raw Google Drive, MEGA, and TeraBox share links do not reliably behave like browser-playable direct video files, so external video handling must distinguish between a true media stream URL and a share-page URL.
+- Future feature work should explicitly harden external-link playback rules, provider validation, and embed/stream handling instead of assuming every saved external URL is safely playable through the native browser video element.
+- Next implementation focus should now shift to Feature 13 (cross-platform data and role alignment review), followed by Feature 14 for empty/loading/error state hardening.

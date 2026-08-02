@@ -8350,3 +8350,414 @@ TITLE Moallem Academy Web Implementation Log - Notes for future features...
 - External media links remain a lower-trust fallback path and need final product-policy confirmation during playback work.
 - Teacher approval is now a real product concept, but the exact long-term admin/staff permission matrix can still evolve in later shared-operations features.
 - Any remaining old Supabase-specific assumptions around auth, roles, or data access should be removed if still found elsewhere in the project or docs. 
+
+
+---------------
+
+
+## Feature 12 — Protected Lesson Playback and Media Delivery Hardening
+
+### Goal
+
+Harden the real lesson playback path for **Moallem Academy** so web and mobile playback both rely on the same truthful server-side authorization decision, using:
+
+- centralized lesson access checks
+- protected lesson playback responses
+- Cloudinary authenticated delivery for uploaded videos
+- support for external hosted video links as a temporary valid source type
+- teacher/admin/student-aware playback rules
+- web-safe and mobile-safe playback delivery
+- architecture that prepares the project for a future inline secure player
+
+This feature is about making playback protection **real and enforceable**, not only hiding buttons in the UI.
+
+---
+
+## Decisions used for this feature
+
+- Playback authorization must be decided on the server, never in the client.
+- A lesson is playable only if one of these conditions is true:
+  - the lesson is marked as preview
+  - the signed-in student has a `confirmed` enrollment for the course
+  - the signed-in teacher is the approved owner of the course
+  - the signed-in admin is allowed to inspect protected content
+- Cloudinary-uploaded lesson media must be returned through a signed/authenticated backend-generated playback URL.
+- External links remain supported for now as a valid media source, but they are a weaker protection model because the final media host controls the watch page.
+- Shared lesson/media access logic must stay reusable across:
+  - Server Components
+  - Server Actions
+  - Route Handlers
+  - mobile app HTTP playback requests
+- Media lookup and media URL generation must stay separate from authorization checks.
+- Web playback may still open in a new tab for now; a future feature can replace that with an inline secure player.
+
+---
+
+## Step 1 — Centralize the playback authorization rules
+
+### Files created or updated
+
+- `lib/queries/media.ts`
+- shared role/access helpers already introduced in Feature 11
+- any lesson-access helper used by Route Handlers or web pages
+
+### What was implemented
+
+A shared server-side access decision was established so playback does not depend on page-level assumptions.
+
+The rule used was:
+
+1. load the lesson and its parent course
+2. load the saved lesson media row
+3. identify the current actor from Clerk + synced `profiles`
+4. resolve whether the actor is:
+   - anonymous preview visitor
+   - signed-in student with confirmed enrollment
+   - approved teacher owner
+   - admin
+5. allow or deny playback before returning any playable media URL
+
+### Why this matters
+
+The video player is **not** the source of truth. The backend access decision is the source of truth, and the player only consumes the result.
+
+---
+
+## Step 2 — Keep authorization separate from media URL generation
+
+### Files reviewed or updated
+
+- `lib/queries/media.ts`
+
+### What was confirmed
+
+The implementation kept two concerns separate:
+
+- authorization: who is allowed to access this lesson
+- media delivery: what URL should be returned after access is allowed
+
+The rule used was:
+
+1. authorize first
+2. only then return or generate the playback response
+
+### Why this matters
+
+This prevents Cloudinary details, external-link handling, and future media-provider changes from being mixed into the business rules for course access.
+
+---
+
+## Step 3 — Return Cloudinary uploaded videos through authenticated delivery URLs
+
+### Files reviewed or updated
+
+- `lib/queries/media.ts`
+- playback route under `app/api/lessons/[lessonId]/playback/route.ts`
+
+### What was implemented
+
+For lessons whose media source is `cloudinaryupload`, the backend generates a signed/authenticated playback URL only after the actor is authorized.
+
+The URL generation was adjusted so browser playback works correctly for lesson preview/open flows, including forcing video playback behavior instead of a confusing raw protected-file response.
+
+### Why this matters
+
+Cloudinary authenticated assets are protected file-delivery URLs, not friendly watch pages. Without a correct signed playback URL, browser behavior can degrade into file-download behavior or broken preview behavior instead of proper video playback.
+
+---
+
+## Step 4 — Keep external video links working as a temporary supported source
+
+### Files reviewed or updated
+
+- `lib/queries/media.ts`
+- `app/api/lessons/[lessonId]/playback/route.ts`
+
+### What was implemented
+
+If the lesson media source is `externalLink`, the authorized playback response returns the stored external URL as the current playback target.
+
+This means the same access rules still run first, but once allowed, the final playback destination is controlled by the external provider page.
+
+### Why this matters
+
+This preserves compatibility with the current teacher media workflow while the project still supports externally hosted lesson videos.
+
+### Important note for next features
+
+External links are **not ideal for fully protected lesson video delivery**. They open as normal hosted pages because the external provider controls playback and browser behavior. A later feature should reduce this weakness by either:
+
+- moving protected lessons fully toward Cloudinary-owned media, or
+- introducing a stricter embedded/player strategy for approved providers only
+
+This should stay explicitly tracked as a future improvement so “external links” do not get mistaken for equivalent protection to authenticated Cloudinary delivery.
+
+---
+
+## Step 5 — Add the mobile-safe playback endpoint
+
+### File used
+
+- `app/api/lessons/[lessonId]/playback/route.ts`
+
+### What was implemented
+
+A thin Route Handler was used as the HTTP boundary for both web fallback flows and the mobile app.
+
+The route behavior is:
+
+- `401` when auth is required but missing
+- `403` when the lesson is locked for the current actor
+- `200` with playback JSON when access is allowed
+
+Typical successful response shape:
+
+```json
+{
+  "allowed": true,
+  "reason": "preview",
+  "sourceType": "cloudinaryupload",
+  "playbackUrl": "https://..."
+}
+```
+
+### Why this matters
+
+React Native cannot import `server-only` code or use Server Actions directly. The playback route gives mobile the same protection rules without duplicating access logic.
+
+---
+
+## Step 6 — Confirm the web playback path
+
+### What was implemented
+
+For the web app, the playback flow follows the same server-side rule set:
+
+1. the user requests to open lesson playback
+2. the server resolves access
+3. the server returns a playable URL only if access is allowed
+4. the browser opens the resulting playback target
+
+For Cloudinary media, this target is a signed video delivery URL. For external links, it is the stored provider URL.
+
+### Why this matters
+
+This keeps web behavior truthful without trusting the page itself to decide whether the user should receive a playable link.
+
+### Important browser behavior note
+
+External links naturally open like normal URLs because they come from video-hosting providers that already serve browser-friendly watch pages.
+
+Cloudinary authenticated media behaves differently because it is a protected asset delivery URL, not a hosted watch page. That is why the app had to explicitly generate the signed URL in a browser-playable video format so preview/open behavior works correctly.
+
+---
+
+## Step 7 — Confirm the mobile playback path
+
+### Mobile flow used
+
+1. Mobile calls `GET /api/lessons/[lessonId]/playback`.
+2. The server identifies the signed-in user.
+3. The server resolves the matching app profile.
+4. The server checks preview / enrollment / teacher ownership / admin access.
+5. If access is allowed, the server returns JSON containing `playbackUrl` and `sourceType`.
+6. The mobile app opens the returned URL inside its player or web-view flow.
+
+### Why this matters
+
+Both platforms now depend on one server-side access truth instead of inventing separate playback rules.
+
+---
+
+## Step 8 — Preserve role-aware access beyond students
+
+### What was included in the access decision
+
+The playback logic was hardened to account for more than just preview vs enrolled student:
+
+- anonymous users can access preview lessons only
+- signed-in students can access locked lessons only with `confirmed` enrollment
+- approved teachers can access lessons for courses they own
+- admins can inspect protected lesson media when needed
+
+### Why this matters
+
+Playback protection has to follow the real product roles already established in Feature 11. Otherwise teachers and admins would be blocked incorrectly, or students would still find weak paths around access rules.
+
+---
+
+## Step 9 — Keep the lesson media row as the single source of media truth
+
+### Files reviewed
+
+- lesson media query/mutation layer
+- old lesson fields from earlier schema phases
+
+### What was confirmed
+
+The playback path uses the real `LessonMedia` record as the source of truth for:
+
+- source type
+- Cloudinary public ID
+- external URL
+- any provider-specific delivery fields
+
+The old nullable `Lesson.videoUrl` field remains legacy/deferred and should not drive the protected playback path anymore.
+
+### Why this matters
+
+This prevents the project from drifting back into a mixed “sometimes from `Lesson`, sometimes from `LessonMedia`” media-read pattern.
+
+---
+
+## Step 10 — Local verification used for this feature
+
+### Commands
+
+```bash
+npm run dev
+npx tsc --noEmit
+npm run build
+```
+
+### What to verify on web
+
+- A teacher can open the lesson media management page and still see the current media state.
+- A preview lesson can return a playback URL without confirmed enrollment.
+- A locked lesson does not return a playback URL for unauthenticated users.
+- A locked lesson does not return a playback URL for signed-in but unconfirmed students.
+- A confirmed student receives a playable URL.
+- Cloudinary preview opens as video instead of downloading a file with no useful playback behavior.
+- External-link lessons still open correctly after authorization.
+
+### What to verify for mobile
+
+- `GET /api/lessons/[lessonId]/playback` returns `401` when auth is required and missing.
+- The same endpoint returns `403` when the lesson is locked and enrollment is not confirmed.
+- The same endpoint returns `200` plus `playbackUrl` when the lesson is preview or confirmed.
+- The returned `sourceType` matches the actual saved lesson media row.
+
+---
+
+## Step 11 — How to test this feature from Postman
+
+### A. Preview lesson playback
+
+#### Request
+
+- Method: `GET`
+- URL: `http://localhost:3000/api/lessons/PREVIEW_LESSON_ID/playback`
+
+#### Expected result
+
+For a published preview lesson with valid media:
+
+- Status `200`
+- JSON contains:
+
+```json
+{
+  "allowed": true,
+  "reason": "preview",
+  "sourceType": "externalLink",
+  "playbackUrl": "https://..."
+}
+```
+
+or, for uploaded Cloudinary media:
+
+```json
+{
+  "allowed": true,
+  "reason": "preview",
+  "sourceType": "cloudinaryupload",
+  "playbackUrl": "https://res.cloudinary.com/..."
+}
+```
+
+---
+
+### B. Locked lesson without enrollment
+
+#### Request
+
+- Method: `GET`
+- URL: `http://localhost:3000/api/lessons/LOCKED_LESSON_ID/playback`
+
+#### Expected result
+
+- Status `401` if sign-in is required and the user is not authenticated
+- or `403` if the user is authenticated but not confirmed for the course
+
+Typical JSON:
+
+```json
+{
+  "allowed": false,
+  "reason": "not_enrolled"
+}
+```
+
+---
+
+### C. Locked lesson with confirmed enrollment
+
+#### Setup first
+
+Use Prisma Studio or the database to ensure there is a matching `enrollments` row:
+
+- `profileId` belongs to the signed-in student
+- `courseId` matches the lesson’s course
+- `status = confirmed`
+
+#### Request
+
+- Method: `GET`
+- URL: `http://localhost:3000/api/lessons/LOCKED_LESSON_ID/playback`
+
+#### Expected result
+
+- Status `200`
+- JSON contains:
+  - `allowed: true`
+  - `playbackUrl` is present
+
+---
+
+## Step 12 — Commit the feature
+
+### Command
+
+```bash
+git add .
+git commit -m "feat(12): harden protected lesson playback delivery"
+git push origin main
+```
+
+### Why this matters
+
+This saves the shared server-side playback authorization foundation, the protected media delivery behavior, and the mobile-safe playback endpoint in one coherent feature.
+
+---
+
+## Feature 12 completion checklist
+
+- [x] Shared lesson playback authorization rules were centralized
+- [x] Authorization was kept separate from media URL generation
+- [x] Cloudinary uploaded media uses authenticated backend-generated playback URLs
+- [x] External links remain supported behind the same server-side access checks
+- [x] Web playback path uses truthful server-approved playback URLs
+- [x] Mobile playback path uses `GET /api/lessons/[lessonId]/playback`
+- [x] Preview, confirmed enrollment, teacher ownership, and admin access were all accounted for
+- [x] `LessonMedia` is treated as the source of truth for protected playback
+- [x] Browser behavior for Cloudinary playback was corrected
+- [x] The external-link weakness was explicitly documented for a future hardening feature
+
+---
+
+## Notes for future features
+
+- A later UX feature can replace new-tab playback with an inline secure video player.
+- A later cleanup feature can safely remove legacy `Lesson.videoUrl` reads once all code paths depend only on `LessonMedia`.
+- External hosted video links should be treated as a temporary compatibility path, not as fully equivalent protection to authenticated Cloudinary delivery.
+- A future media-hardening feature should decide whether protected lessons must eventually require first-party controlled media delivery only.
