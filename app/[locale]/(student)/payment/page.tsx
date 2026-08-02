@@ -53,6 +53,7 @@ export default async function PaymentInstructionsPage({
                   alt={t("shamCashQr")}
                   width={200}
                   height={200}
+                  unoptimized
                   className="rounded-lg border"
                 />
               </div>

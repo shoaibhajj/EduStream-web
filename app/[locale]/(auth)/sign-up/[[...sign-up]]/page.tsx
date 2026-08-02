@@ -23,6 +23,7 @@ export default async function SignUpPage({ params }: Props) {
         path={`/${locale}/sign-up`}
         routing="path"
         signInUrl={`/${locale}/sign-in`}
+        fallbackRedirectUrl={`/${locale}`}
       />
     </AuthShell>
   );

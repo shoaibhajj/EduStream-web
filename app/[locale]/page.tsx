@@ -1,11 +1,38 @@
+import { auth } from "@clerk/nextjs/server";
 import { Show, UserButton } from "@clerk/nextjs";
-import { useTranslations } from "next-intl";
-import { Link } from "@/i18n/navigation";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { getTranslations } from "next-intl/server";
+import { Link, redirect } from "@/i18n/navigation";
+import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+// replace this import with your real Prisma client path/export
+import { prisma } from "@/lib/prisma";
 
-export default function HomePage() {
-  const t = useTranslations("HomePage");
+type Props = {
+  params: Promise<{ locale: string }>;
+};
+
+export default async function HomePage({ params }: Props) {
+  const { locale } = await params;
+  const { userId } = await auth();
+
+  if (userId) {
+    const profile = await prisma.profile.findUnique({
+      where: { clerkUserId: userId },
+      select: { role: true },
+    });
+
+    if (profile?.role === "teacher") {
+      redirect({ href: "/teacher", locale });
+    }
+
+    if (profile?.role === "admin") {
+      redirect({ href: "/admin", locale });
+    }
+
+    redirect({ href: "/browse", locale });
+  }
+
+  const t = await getTranslations("HomePage");
 
   return (
     <main className="min-h-screen bg-background text-text-primary">
@@ -16,7 +43,7 @@ export default function HomePage() {
           <Show when="signed-out">
             <Link
               href="/sign-in"
-              className="text-sm text-text-secondary hover:text-text-primary transition-colors"
+              className="text-sm text-text-secondary transition-colors hover:text-text-primary"
             >
               {t("signIn")}
             </Link>

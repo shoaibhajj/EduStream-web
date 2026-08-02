@@ -117,7 +117,9 @@ export default async function CourseDetailPage({
             <ChevronRight size={14} className="rotate-180 rtl:rotate-0" />
             {t("backToCourses")}
           </Link>
-
+          {/* <Link href={`/payment/request?courseId=${courseId}`}>
+            {t("course.requestPayment")}
+          </Link> */}
           {/* Course header */}
           <SectionCard className="mb-6">
             {course!.thumbnailUrl && (
@@ -153,7 +155,13 @@ export default async function CourseDetailPage({
           {clerkUserId && enrollmentStatus === "none" && (
             <SectionCard className="mb-6 flex items-center justify-between gap-4">
               <p className="text-sm text-text-secondary">{t("enrollCta")}</p>
-              {/* Enroll button — wired in Feature 10 */}
+
+              <Link
+                href={`/${locale}/payment/request?courseId=${course!.id}`}
+                className={cn(buttonVariants({ size: "sm" }), "w-fit")}
+              >
+                {t("enrollCta")}
+              </Link>
             </SectionCard>
           )}
 

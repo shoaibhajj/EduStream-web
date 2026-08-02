@@ -233,5 +233,20 @@
     "noMedia": "No video source has been added to this lesson yet",
     "externalLinkNotice": "This video is hosted on an external service. Protection is lower than for directly uploaded content.",
     "errorLoad": "Failed to load lesson, please try again"
+  },
+  "nav": {
+  "brand": "Moallem Academy",
+  "browse": "Browse Courses",
+  "payment": "Payment",
+  "student": "My Account",
+  "dashboard": "Dashboard",
+  "courses": "Courses",
+  "teachers": "Teachers",
+  "paymentConfig": "Payment Settings",
+  "paymentRequests": "Payment Requests",
+  "teacherPayments": "Teacher Payments"
+},
+  "course": {
+    "requestPayment": "Request Payment & Enrollment"
   }
 }

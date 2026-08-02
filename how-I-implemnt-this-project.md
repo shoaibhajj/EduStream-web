@@ -8761,3 +8761,309 @@ This saves the shared server-side playback authorization foundation, the protect
 - A later cleanup feature can safely remove legacy `Lesson.videoUrl` reads once all code paths depend only on `LessonMedia`.
 - External hosted video links should be treated as a temporary compatibility path, not as fully equivalent protection to authenticated Cloudinary delivery.
 - A future media-hardening feature should decide whether protected lessons must eventually require first-party controlled media delivery only.
+
+
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Feature 13 Routing, Navigation, and Payment Route Fixes - Goal...
+
+Make the web app actually usable and demo-ready by fixing the routing foundation, correcting localized post-auth movement, surfacing payment pages through real route entry points, and adding the minimum shared navigation needed now without blocking the larger UI/sidebar work planned later.
+
+This feature specifically focused on:
+- fixing localized auth-safe routing behavior
+- stopping broken or misleading route movement
+- making payment pages reachable for student, teacher, and admin roles
+- improving app navigation beyond inline links and browser back behavior
+- preserving role-aware access truth through the existing shared backend access pattern
+
+The implementation stayed aligned with:
+- Arabic-first localized routing
+- Clerk for authentication
+- Neon + Prisma for the database layer
+- `profiles` as the app-level source of truth for role and approval state
+- the existing payment flows from Feature 10
+- the existing shared access and media foundations from Features 11 and 12
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Feature 13 Decisions used for this feature...
+
+- Locale-aware routing had to be treated as a delivery blocker, not a polish task.
+- Payment functionality was already built earlier, but it was not considered truly delivered until users could reach the relevant pages through working visible route flows.
+- Dynamic route templates such as `/browse/[yearId]` or `/course/[courseId]/lesson/[lessonId]` were not added to the shared top-level nav, because a persistent nav bar cannot truthfully know real dynamic IDs in advance.
+- Shared navigation for this feature was intentionally kept minimal so it improves current usability without conflicting with the fuller sidebar/navigation overhaul planned for Feature 15.
+- User-submitted payment-proof images may come from arbitrary external hosts, so payment-proof rendering should avoid brittle host-specific optimizer assumptions.
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 1 Audit the real routing and payment route state - What was checked...
+
+The implementation audit reviewed:
+- the root routing middleware file
+- the localized route tree under `app/[locale]/...`
+- auth route behavior for `sign-in` and `sign-up`
+- the root localized landing page behavior
+- existing student, teacher, and admin payment routes
+- whether shared localized navigation helpers already existed
+- whether current page movement depended too heavily on inline links
+
+Key findings:
+- the project had localized routing structure in place under `app/[locale]`
+- `next-intl` routing was already configured with Arabic default locale and always-prefixed locale URLs
+- payment pages already existed for student, teacher, and admin flows
+- the app still needed better route entry points and clearer movement between product areas
+- payment image rendering through `next/image` was fragile for arbitrary third-party receipt URLs
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 2 Confirm the localized routing baseline - Files used...
+
+- `i18n/routing.ts`
+- `i18n/navigation.ts`
+- `app/[locale]/page.tsx`
+- `app/[locale]/(auth)/sign-in/[[...sign-in]]/page.tsx`
+- `app/[locale]/(auth)/sign-up/[[...sign-up]]/page.tsx`
+
+Direction used:
+- keep Arabic as the default locale
+- keep locale prefix behavior first-class
+- use the project’s localized navigation helpers instead of mixing route assumptions
+- avoid linking users to non-localized paths when localized ones already exist
+
+This preserved the app’s Arabic-first routing truth instead of treating localization as an optional UI concern.
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 3 Correct the localized post-auth landing behavior - File updated...
+
+- `app/[locale]/page.tsx`
+
+Implementation used:
+- the root localized page was updated so signed-in users do not simply remain on the public landing screen
+- the page now performs role-aware redirect behavior from the localized root route
+- signed-out users still see the public localized landing page
+- signed-in users are moved toward the correct localized product destination instead of being left at a dead-end entry point
+
+Direction used:
+- admin and staff users should go toward the admin area
+- approved teachers should go toward the teacher area
+- student/default users should go toward the browse flow
+
+This matters because Feature 13 required login/sign-in flows to land on truthful localized product routes instead of leaving users on `/` or a non-working root state.
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 4 Keep the app on localized navigation helpers - File pattern corrected...
+
+The project already had localized helpers in:
+- `i18n/navigation.ts`
+
+During Feature 13, route movement was corrected toward using the localized navigation system rather than scattering raw route assumptions.
+
+Important correction applied:
+- page-level navigation that should stay locale-aware was moved toward using the shared localized `Link` helper pattern
+- when a page only needed a visual button-style link, the existing project rule stayed the same: use `Link` plus `buttonVariants(...)`, not `Button asChild`
+
+This kept route movement aligned with the app’s locale-first architecture and with the previously established shared button-link pattern.
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 5 Add the minimum shared app navigation now - File created...
+
+- `components/shared/app-nav.tsx`
+
+Implementation direction used:
+- build only the minimum shared nav needed for current usability
+- keep the component compatible with future Feature 15 sidebar work
+- show role-specific top-level destinations only
+- do not include fake dynamic-template links in persistent navigation
+
+The initial nav structure used was:
+
+For students:
+- `/browse`
+- `/payment`
+- `/student`
+
+For teachers:
+- `/teacher`
+- `/teacher/courses`
+- `/teacher/payment`
+
+For admins:
+- `/admin`
+- `/admin/teachers`
+- `/admin/payment`
+- `/admin/payment/requests`
+- `/admin/payment/teachers`
+
+Important correction made:
+dynamic route placeholders like:
+- `/browse/[yearId]`
+- `/browse/[yearId]/[subjectId]`
+- `/course/[courseId]`
+- `/course/[courseId]/lesson/[lessonId]`
+
+were intentionally removed from shared nav because they require real runtime IDs and belong in contextual navigation, not in global product navigation.
+
+This matters because fake dynamic-template links create broken or misleading movement and make the app feel less stable during demos.
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 6 Add localized navigation labels - Files updated...
+
+- `messages/ar.json`
+- `messages/en.json`
+
+A new `nav` namespace was added for the shared app navigation labels.
+
+The labels covered:
+- brand
+- browse
+- payment
+- student
+- dashboard
+- courses
+- teachers
+- paymentConfig
+- paymentRequests
+- teacherPayments
+
+This matters because Feature 13 required all newly visible navigation text to come from localization files instead of being hardcoded in components.
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 7 Keep payment pages reachable through real navigation - Routes reviewed...
+
+Student payment routes reviewed:
+- `app/[locale]/(student)/payment/page.tsx`
+- `app/[locale]/(student)/payment/request/page.tsx`
+
+Teacher payment route reviewed:
+- `app/[locale]/(teacher)/teacher/payment/page.tsx`
+
+Admin payment routes reviewed:
+- `app/[locale]/(admin)/admin/payment/page.tsx`
+- `app/[locale]/(admin)/admin/payment/requests/page.tsx`
+- `app/[locale]/(admin)/admin/payment/teachers/page.tsx`
+
+Implementation direction used:
+- ensure payment pages are not only present in the file tree
+- ensure role-appropriate users can reach them through visible app movement
+- keep server-side authorization truth separate from visible navigation reachability
+
+This matters because Feature 10’s payment flow was already built, but Feature 13 had to make that functionality actually reachable and usable.
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 8 Fix the student course enrollment CTA so it reaches payment - File updated...
+
+- `app/[locale]/(student)/course/[courseId]/page.tsx`
+
+Problem found:
+the course detail page showed the enrollment CTA area for `enrollmentStatus === "none"`, but the actual action button was missing and only a comment remained in the code. That left the user with a visible enrollment section but no real path into the payment request flow.
+
+Implementation used:
+- keep the visible CTA text localized through the existing translation key
+- replace the dead placeholder area with a real link to the payment request route for the current course
+- pass the real `courseId` in the request route query string
+- keep pending, rejected, and confirmed states as status-driven UI instead of a clickable enrollment CTA
+
+Pattern used:
+- use `Link` styled with `buttonVariants(...)`
+- route to the localized payment request flow for the active course
+
+Result:
+users can now move from course detail into the payment request flow through a truthful working route instead of depending on hidden links or manual URL entry.
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 9 Keep course-detail movement truthful - File updated...
+
+- `app/[locale]/(student)/course/[courseId]/page.tsx`
+
+Additional cleanup used:
+- stale commented-out payment link code was removed
+- the course-detail page stayed aligned with localized route movement
+- the back link and payment CTA behavior were kept consistent with the project’s navigation patterns
+
+This matters because dead comments and half-wired route placeholders make the implementation harder to maintain and easier to break later.
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 10 Handle arbitrary payment-proof image hosts safely - File updated...
+
+- `app/[locale]/(student)/payment/page.tsx`
+
+Problem found:
+payment-proof image URLs may come from arbitrary external hosts such as `i.ibb.co`, and using `next/image` for user-submitted third-party image URLs made rendering fragile because host allowlists in Next.js image optimization are host-specific.
+
+Implementation direction used:
+- do not try to make Feature 13 depend on every possible remote image host
+- for user-submitted external payment-proof images, avoid brittle host-specific optimizer assumptions
+- keep app-owned or predictable media concerns separate from arbitrary third-party receipt image rendering
+
+Practical outcome used in this feature:
+- payment-proof image rendering was adjusted away from the fragile “must whitelist every host” assumption
+- this kept the payment review flow demo-safe even when proof images come from different external providers
+
+This matters because payment route reachability is not truly usable if the submitted proof image area breaks on common third-party links.
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 11 Keep shared authorization truth intact - Rules preserved...
+
+Feature 13 improved route reachability and navigation, but it did not treat visible nav as authorization truth.
+
+The same backend rules remained important:
+- route visibility does not grant access
+- role checks still belong in shared access helpers and protected server-side logic
+- teachers should only manage their own teacher routes and data
+- admins and staff keep elevated management access
+- students only move through student-safe payment and course flows unless broader access is explicitly granted
+
+This matters because improving navigation must never weaken backend authorization.
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 12 Local verification used for this feature - Commands...
+
+```bash
+npm run dev
+npm run build
+```
+
+Additional manual route checks used:
+- visit `/ar` signed out and confirm the landing page still renders correctly
+- sign in and confirm post-auth movement no longer leaves users stranded on a useless root state
+- verify student movement into browse and payment flows
+- verify teacher payment page is reachable through teacher navigation
+- verify admin payment config, payment requests, and teacher-payment pages are reachable through admin navigation
+- open a real course detail page and confirm the course CTA moves into the payment request route
+- verify pending, rejected, and confirmed enrollment states still show truthful status UI
+- verify payment-proof image rendering works with third-party external image URLs
+- verify newly added navigation labels render from localization files in Arabic and English
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Step 13 What Feature 13 completed - Completion checklist...
+
+- [x] localized routing remained first-class
+- [x] post-auth route flow moved toward valid localized destinations
+- [x] major route/link mismatches were reduced across current student, teacher, and admin flows
+- [x] payment pages are reachable through working routes and clearer movement paths
+- [x] course detail now has a real CTA path into the payment request flow
+- [x] minimum shared navigation exists without pretending dynamic routes are static nav items
+- [x] no new visible navigation labels were hardcoded outside localization files
+- [x] arbitrary external payment-proof image hosts no longer depend on a brittle one-host-at-a-time assumption
+- [x] the implementation stayed compatible with later Feature 15 sidebar/UI work
+
+---
+
+TITLE Moallem Academy Web Implementation Log - Notes for future features...
+
+- Feature 14 should now focus on provider-aware external video playback hardening, especially for unsupported raw links from providers such as Google Drive, MEGA, and TeraBox.
+- Feature 15 can safely expand the current minimal nav into a fuller role-aware sidebar and stronger product-level layout hierarchy.
+- If the app later standardizes payment-proof uploads into a controlled storage path, the temporary permissive external-image rendering policy can be tightened.
+- Mobile/API route parity still needs a final review before delivery readiness is complete.
