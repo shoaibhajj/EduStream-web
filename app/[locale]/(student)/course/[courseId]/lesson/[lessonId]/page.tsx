@@ -19,9 +19,12 @@ export default async function LessonWatchPage({
   const t = await getTranslations("Playback");
 
   const profile = await getCurrentProfile();
+
+  // resolvePlaybackAccess now returns PlaybackResponse:
+  // { allowed: true, resolved: ResolvedPlayback } | { allowed: false, reason: string }
   const result = await resolvePlaybackAccess(profile, lessonId);
 
-  // Fetch lesson for title display only (no media here — already resolved above)
+  // Fetch lesson for title display only — media resolution is already handled above
   const lesson = await prisma.lesson.findUnique({
     where: { id: lessonId },
     select: { titleAr: true, titleEn: true, isPublished: true },
@@ -45,7 +48,9 @@ export default async function LessonWatchPage({
       <h1 className="text-xl font-bold text-text-primary mb-6">{title}</h1>
 
       <SectionCard>
-        <LessonPlayer result={result} locale={locale} />
+        {/* LessonPlayer now receives the full PlaybackResponse shape.
+            It handles allowed/denied/unsupported/strategy internally. */}
+        <LessonPlayer result={result} />
       </SectionCard>
     </main>
   );

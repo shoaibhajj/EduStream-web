@@ -9067,3 +9067,741 @@ TITLE Moallem Academy Web Implementation Log - Notes for future features...
 - Feature 15 can safely expand the current minimal nav into a fuller role-aware sidebar and stronger product-level layout hierarchy.
 - If the app later standardizes payment-proof uploads into a controlled storage path, the temporary permissive external-image rendering policy can be tightened.
 - Mobile/API route parity still needs a final review before delivery readiness is complete.
+
+
+---
+TITLE: Moallem Academy Web Implementation Log — Feature 14 External Video Playback Hardening — Goal
+
+Harden external video playback so the app behaves truthfully and reliably in production, with:
+- Cloudinary staying the owned-media path
+- Dailymotion becoming the supported external-video path
+- unsupported providers rejected or surfaced clearly instead of pretending any arbitrary share link is playable
+- server-authorized playback resolution preserved
+- a realistic anti-download and anti-recommendation approach that works within the current Dailymotion account constraints.[web:46][web:47][web:337]
+
+---
+
+TITLE: Moallem Academy Web Implementation Log — Feature 14 External Video Playback Hardening — Decisions used for this feature
+
+- The app will no longer treat `externalUrl` as if every provider is a playable lesson-video source.
+- Cloudinary remains the most reliable path for owned uploaded media.
+- Dailymotion is the supported external-video provider for protected external playback.
+- The implementation supports two Dailymotion ingestion flows:
+  - app-managed Dailymotion upload flow
+  - teacher-pasted Dailymotion link flow
+- Unsupported providers such as Google Drive, MEGA, and TeraBox must resolve to an explicit unsupported state instead of a broken player.
+- Playback authorization logic does not change; lesson playback must still be resolved only after access checks succeed.
+- The final student Dailymotion playback path is iframe-based embed, not SDK-based React player mounting, because the iframe path proved stable in-app while the SDK path repeatedly produced black/empty player states.[web:46][web:47]
+- Dailymotion recommendation behavior at the end of playback cannot be fully relied on through Player-level controls in the current setup, so the shipped workaround is to hide the iframe shortly before the true end and replace it with an app-owned replay overlay.[web:337][web:338][web:349]
+
+---
+
+TITLE: Moallem Academy Web Implementation Log — Step 1 Add provider-aware playback types — File to update
+
+`lib/types/media.ts`
+
+TITLE: Moallem Academy Web Implementation Log — Step 1 Add provider-aware playback types — Code
+
+```ts
+export type ResolvedPlayback =
+  | {
+      strategy: "cloudinary_signed";
+      url: string;
+      isOwned: boolean;
+      externalNotice: null;
+    }
+  | {
+      strategy: "dailymotion_embed";
+      videoId: string;
+      isOwned: false;
+      externalNotice: string | null;
+      durationSeconds?: number | null;
+    }
+  | {
+      strategy: "unsupported_external";
+      provider: string | null;
+      originalUrl: string | null;
+      isOwned: false;
+      externalNotice: string;
+    };
+
+export type PlaybackResponse =
+  | {
+      allowed: false;
+      reason: "not_found" | "not_published" | "not_enrolled" | "no_media";
+    }
+  | {
+      allowed: true;
+      resolved: ResolvedPlayback;
+    };
+```
+
+TITLE: Moallem Academy Web Implementation Log — Step 1 Add provider-aware playback types — Why this matters
+
+The app now has a truthful playback contract. Instead of returning a flat URL-like result for everything, playback is modeled as a provider-aware resolution result that the UI can render honestly.
+
+---
+
+TITLE: Moallem Academy Web Implementation Log — Step 2 Add Dailymotion URL parsing helpers — File to create
+
+`lib/utils/dailymotion.ts`
+
+TITLE: Moallem Academy Web Implementation Log — Step 2 Add Dailymotion URL parsing helpers — Code
+
+```ts
+const DM_HOSTS = new Set([
+  "www.dailymotion.com",
+  "dailymotion.com",
+  "dai.ly",
+]);
+
+export function extractDailymotionVideoId(input: string): string | null {
+  try {
+    const url = new URL(input.trim());
+    const host = url.hostname.toLowerCase();
+
+    if (!DM_HOSTS.has(host)) return null;
+
+    if (host === "dai.ly") {
+      const id = url.pathname.split("/").filter(Boolean);
+      return id || null;
+    }
+
+    const parts = url.pathname.split("/").filter(Boolean);
+
+    const videoIndex = parts.findIndex((part) => part === "video");
+    if (videoIndex >= 0 && parts[videoIndex + 1]) {
+      return parts[videoIndex + 1];
+    }
+
+    const embedIndex = parts.findIndex((part) => part === "embed");
+    if (embedIndex >= 0 && parts[embedIndex + 2]) {
+      return parts[embedIndex + 2];
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function isDailymotionUrl(input: string): boolean {
+  return extractDailymotionVideoId(input) !== null;
+}
+```
+
+TITLE: Moallem Academy Web Implementation Log — Step 2 Add Dailymotion URL parsing helpers — Why this matters
+
+Teacher-pasted links must be normalized before storage or playback. This keeps `dai.ly/...` and `dailymotion.com/video/...` flows compatible with the same final player logic.
+
+---
+
+TITLE: Moallem Academy Web Implementation Log — Step 3 Extend lesson media storage for Dailymotion metadata — File to update
+
+`prisma/schema.prisma`
+
+TITLE: Moallem Academy Web Implementation Log — Step 3 Extend lesson media storage for Dailymotion metadata — Code
+
+```prisma
+model LessonMedia {
+  id                   String   @id @default(cuid())
+  lessonId             String   @unique
+  sourceType           LessonMediaSource
+  cloudinaryPublicId   String?
+  externalUrl          String?
+  dailymotionVideoId   String?
+  dailymotionPrivateId String?
+  durationSeconds      Int?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+}
+```
+
+TITLE: Moallem Academy Web Implementation Log — Step 3 Extend lesson media storage for Dailymotion metadata — Why this matters
+
+Feature 14 needs structured provider-specific storage, not just one generic external URL string. The player now depends on provider-aware fields and optional duration metadata.
+
+---
+
+TITLE: Moallem Academy Web Implementation Log — Step 4 Run Prisma migration and client generation — Commands
+
+```bash
+npx prisma migrate dev --name add-dailymotion-playback-fields
+npx prisma generate
+```
+
+TITLE: Moallem Academy Web Implementation Log — Step 4 Run Prisma migration and client generation — Why this matters
+
+The database must be updated before query and playback logic can use the new provider-specific fields safely.
+
+---
+
+TITLE: Moallem Academy Web Implementation Log — Step 5 Update teacher external-link save route to normalize Dailymotion links — File to update
+
+`app/api/teacher/lessons/[lessonId]/external-link/route.ts`
+
+TITLE: Moallem Academy Web Implementation Log — Step 5 Update teacher external-link save route to normalize Dailymotion links — Code
+
+```ts
+import { NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
+import { prisma } from "@/lib/prisma";
+import { extractDailymotionVideoId } from "@/lib/utils/dailymotion";
+
+export async function POST(
+  request: Request,
+  { params }: { params: Promise<{ lessonId: string }> }
+) {
+  const { userId } = await auth();
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { lessonId } = await params;
+  const body = await request.json().catch(() => null);
+  const externalUrl = body?.externalUrl?.trim();
+
+  if (!externalUrl) {
+    return NextResponse.json({ error: "External URL is required" }, { status: 400 });
+  }
+
+  const dailymotionVideoId = extractDailymotionVideoId(externalUrl);
+
+  await prisma.lessonMedia.upsert({
+    where: { lessonId },
+    update: {
+      sourceType: "external_link",
+      externalUrl,
+      dailymotionVideoId,
+      cloudinaryPublicId: null,
+    },
+    create: {
+      lessonId,
+      sourceType: "external_link",
+      externalUrl,
+      dailymotionVideoId,
+    },
+  });
+
+  return NextResponse.json({ success: true });
+}
+```
+
+TITLE: Moallem Academy Web Implementation Log — Step 5 Update teacher external-link save route to normalize Dailymotion links — Why this matters
+
+When teachers paste a Dailymotion link, the app now stores the normalized Dailymotion identifier needed for reliable student playback.
+
+---
+
+TITLE: Moallem Academy Web Implementation Log — Step 6 Update playback resolution to return the new provider-aware shape — File to update
+
+`lib/queries/media.ts`
+
+TITLE: Moallem Academy Web Implementation Log — Step 6 Update playback resolution to return the new provider-aware shape — Code
+
+```ts
+import "server-only";
+
+import { prisma } from "@/lib/prisma";
+import type { PlaybackResponse } from "@/lib/types/media";
+
+function detectUnsupportedProvider(url: string | null): string | null {
+  if (!url) return null;
+
+  const value = url.toLowerCase();
+
+  if (value.includes("drive.google.com")) return "google_drive";
+  if (value.includes("mega.nz")) return "mega";
+  if (value.includes("terabox.com")) return "terabox";
+  if (value.includes("1024terabox.com")) return "terabox";
+
+  return null;
+}
+
+export async function resolvePlaybackAccess(
+  profile: { id: string } | null,
+  lessonId: string
+): Promise<PlaybackResponse> {
+  const lesson = await prisma.lesson.findUnique({
+    where: { id: lessonId },
+    select: {
+      id: true,
+      isPublished: true,
+      isFreePreview: true,
+      courseId: true,
+      media: {
+        select: {
+          sourceType: true,
+          cloudinaryPublicId: true,
+          externalUrl: true,
+          dailymotionVideoId: true,
+          dailymotionPrivateId: true,
+          durationSeconds: true,
+        },
+      },
+    },
+  });
+
+  if (!lesson) return { allowed: false, reason: "not_found" };
+  if (!lesson.isPublished) return { allowed: false, reason: "not_published" };
+
+  const hasAccess =
+    lesson.isFreePreview ||
+    (!!profile &&
+      !!(await prisma.enrollment.findFirst({
+        where: {
+          profileId: profile.id,
+          courseId: lesson.courseId,
+          status: "confirmed",
+        },
+        select: { id: true },
+      })));
+
+  if (!hasAccess) return { allowed: false, reason: "not_enrolled" };
+  if (!lesson.media) return { allowed: false, reason: "no_media" };
+
+  if (lesson.media.sourceType === "cloudinary_upload" && lesson.media.cloudinaryPublicId) {
+    const signedUrl = `TODO_GENERATE_SIGNED_CLOUDINARY_URL`;
+
+    return {
+      allowed: true,
+      resolved: {
+        strategy: "cloudinary_signed",
+        url: signedUrl,
+        isOwned: true,
+        externalNotice: null,
+      },
+    };
+  }
+
+  if (lesson.media.sourceType === "external_link") {
+    const videoId =
+      lesson.media.dailymotionPrivateId || lesson.media.dailymotionVideoId;
+
+    if (videoId) {
+      return {
+        allowed: true,
+        resolved: {
+          strategy: "dailymotion_embed",
+          videoId,
+          isOwned: false,
+          externalNotice: null,
+          durationSeconds: lesson.media.durationSeconds,
+        },
+      };
+    }
+
+    const provider = detectUnsupportedProvider(lesson.media.externalUrl);
+
+    return {
+      allowed: true,
+      resolved: {
+        strategy: "unsupported_external",
+        provider,
+        originalUrl: lesson.media.externalUrl,
+        isOwned: false,
+        externalNotice:
+          "This external video provider is not supported for protected lesson playback.",
+      },
+    };
+  }
+
+  return { allowed: false, reason: "no_media" };
+}
+```
+
+TITLE: Moallem Academy Web Implementation Log — Step 6 Update playback resolution to return the new provider-aware shape — Why this matters
+
+Playback is now resolved as product logic, not as a naive saved URL. The server decides what kind of player the student should get after authorization succeeds.
+
+---
+
+TITLE: Moallem Academy Web Implementation Log — Step 7 Update the watch page to pass the full result shape — File to update
+
+`app/[locale]/(student)/watch/[courseId]/[lessonId]/page.tsx`
+
+TITLE: Moallem Academy Web Implementation Log — Step 7 Update the watch page to pass the full result shape — Code
+
+```tsx
+import { notFound } from "next/navigation";
+import { getTranslations } from "next-intl/server";
+import Link from "next/link";
+import { ChevronRight } from "lucide-react";
+import { getCurrentProfile } from "@/lib/access/guards";
+import { resolvePlaybackAccess } from "@/lib/queries/media";
+import { prisma } from "@/lib/prisma";
+import { LessonPlayer } from "@/components/student/LessonPlayer";
+import { SectionCard } from "@/components/shared/SectionCard";
+
+export default async function LessonWatchPage({
+  params,
+}: {
+  params: Promise<{ locale: string; courseId: string; lessonId: string }>;
+}) {
+  const { locale, courseId, lessonId } = await params;
+  const t = await getTranslations("Playback");
+
+  const profile = await getCurrentProfile();
+  const result = await resolvePlaybackAccess(profile, lessonId);
+
+  const lesson = await prisma.lesson.findUnique({
+    where: { id: lessonId },
+    select: { titleAr: true, titleEn: true, isPublished: true },
+  });
+
+  if (!lesson || !lesson.isPublished) notFound();
+
+  const title =
+    locale === "ar" ? lesson.titleAr : lesson.titleEn ?? lesson.titleAr;
+
+  return (
+    <main className="px-6 py-10 max-w-3xl mx-auto">
+      <Link
+        href={`/${locale}/course/${courseId}`}
+        className="mb-6 inline-flex items-center gap-1 text-sm text-text-muted hover:text-text-secondary transition-colors"
+      >
+        <ChevronRight size={14} className="rotate-180 rtl:rotate-0" />
+        {t("backToCourse")}
+      </Link>
+
+      <h1 className="text-xl font-bold text-text-primary mb-6">{title}</h1>
+
+      <SectionCard>
+        <LessonPlayer result={result} locale={locale} />
+      </SectionCard>
+    </main>
+  );
+}
+```
+
+TITLE: Moallem Academy Web Implementation Log — Step 7 Update the watch page to pass the full result shape — Why this matters
+
+The page no longer needs to understand provider-specific playback internals. It simply passes the resolved server result to the player layer.
+
+---
+
+TITLE: Moallem Academy Web Implementation Log — Step 8 Create the final iframe-based Dailymotion player — File to create
+
+`components/student/DailymotionPlayer.tsx`
+
+TITLE: Moallem Academy Web Implementation Log — Step 8 Create the final iframe-based Dailymotion player — Code
+
+```tsx
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Button } from "@/components/ui/button";
+
+type Props = {
+  videoId: string;
+  replayLabel: string;
+  endedLabel: string;
+  durationSeconds?: number | null;
+};
+
+export function DailymotionPlayer({
+  videoId,
+  replayLabel,
+  endedLabel,
+  durationSeconds,
+}: Props) {
+  const playerId = process.env.NEXT_PUBLIC_DAILYMOTION_PLAYER_ID || "x1lwfu";
+  const [ended, setEnded] = useState(false);
+  const [instanceKey, setInstanceKey] = useState(0);
+  const [started, setStarted] = useState(false);
+  const timerRef = useRef<number | null>(null);
+
+  const src = useMemo(() => {
+    const params = new URLSearchParams({
+      video: videoId,
+      autoplay: "0",
+      "endscreen-enable": "false",
+    });
+
+    return `https://geo.dailymotion.com/player/${playerId}.html?${params.toString()}`;
+  }, [playerId, videoId]);
+
+  useEffect(() => {
+    if (!started || typeof durationSeconds !== "number" || durationSeconds <= 0) {
+      return;
+    }
+
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current);
+    }
+
+    const hideBeforeEndMs = Math.max(0, durationSeconds * 1000 - 1200);
+
+    timerRef.current = window.setTimeout(() => {
+      setEnded(true);
+    }, hideBeforeEndMs);
+
+    return () => {
+      if (timerRef.current !== null) {
+        window.clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, [started, durationSeconds, instanceKey]);
+
+  useEffect(() => {
+    const handleContextMenu = (e: MouseEvent) => e.preventDefault();
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const k = e.key.toLowerCase();
+
+      if (e.ctrlKey && ["s", "u", "p", "c", "x", "a"].includes(k)) {
+        e.preventDefault();
+      }
+
+      if (
+        e.key === "F12" ||
+        (e.ctrlKey && e.shiftKey && ["i", "j", "c"].includes(k))
+      ) {
+        e.preventDefault();
+      }
+    };
+
+    document.addEventListener("contextmenu", handleContextMenu);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("contextmenu", handleContextMenu);
+      document.removeEventListener("keydown", handleKeyDown);
+
+      if (timerRef.current !== null) {
+        window.clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, []);
+
+  const handleReplay = () => {
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+
+    setEnded(false);
+    setStarted(false);
+    setInstanceKey((prev) => prev + 1);
+  };
+
+  return (
+    <div className="relative aspect-video w-full overflow-hidden rounded-lg bg-black">
+      {!ended && (
+        <iframe
+          key={`${videoId}-${instanceKey}`}
+          src={src}
+          title="Dailymotion player"
+          allow="autoplay; fullscreen; picture-in-picture; web-share"
+          allowFullScreen
+          className="absolute inset-0 h-full w-full border-0"
+          onLoad={() => {
+            setStarted(true);
+          }}
+        />
+      )}
+
+      {ended && (
+        <div className="absolute inset-0 z-10 grid place-items-center bg-black/85">
+          <div className="flex flex-col items-center gap-3 text-center">
+            <p className="text-sm text-white/80">{endedLabel}</p>
+            <Button type="button" onClick={handleReplay}>
+              {replayLabel}
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+TITLE: Moallem Academy Web Implementation Log — Step 8 Create the final iframe-based Dailymotion player — Why this matters
+
+This is the final shipped Dailymotion player path. The SDK-based player was tested but abandoned because it caused unstable black/empty player behavior, while the iframe path played reliably in-app.[web:46]
+
+---
+
+TITLE: Moallem Academy Web Implementation Log — Step 9 Update the lesson player to handle the new playback shape — File to update
+
+`components/student/LessonPlayer.tsx`
+
+TITLE: Moallem Academy Web Implementation Log — Step 9 Update the lesson player to handle the new playback shape — Code
+
+```tsx
+"use client";
+
+import { AlertTriangle, Lock } from "lucide-react";
+import { useTranslations } from "next-intl";
+import type { PlaybackResponse } from "@/lib/types/media";
+import { DailymotionPlayer } from "@/components/student/DailymotionPlayer";
+
+type Props = {
+  result: PlaybackResponse;
+  locale: string;
+};
+
+export function LessonPlayer({ result }: Props) {
+  const t = useTranslations("Playback");
+
+  if (!result.allowed) {
+    return (
+      <div className="flex aspect-video w-full flex-col items-center justify-center rounded-lg border border-border bg-surface px-6 text-center">
+        <Lock className="mb-3 h-8 w-8 text-text-muted" />
+        <p className="text-sm text-text-secondary">
+          {result.reason === "not_enrolled" ? t("lockedMessage") : t("noMedia")}
+        </p>
+      </div>
+    );
+  }
+
+  const { resolved } = result;
+
+  if (resolved.strategy === "cloudinary_signed") {
+    return (
+      <video
+        className="aspect-video w-full rounded-lg bg-black"
+        controls
+        controlsList="nodownload noplaybackrate"
+        disablePictureInPicture
+        onContextMenu={(e) => e.preventDefault()}
+      >
+        <source src={resolved.url} type="video/mp4" />
+      </video>
+    );
+  }
+
+  if (resolved.strategy === "dailymotion_embed") {
+    return (
+      <DailymotionPlayer
+        videoId={resolved.videoId}
+        replayLabel={t("replayVideo")}
+        endedLabel={t("videoEnded")}
+        durationSeconds={resolved.durationSeconds}
+      />
+    );
+  }
+
+  return (
+    <div className="flex aspect-video w-full flex-col items-center justify-center rounded-lg border border-border bg-surface px-6 text-center">
+      <AlertTriangle className="mb-3 h-8 w-8 text-warning" />
+      <p className="text-sm text-text-secondary">
+        {resolved.externalNotice ?? t("unsupportedExternal")}
+      </p>
+    </div>
+  );
+}
+```
+
+TITLE: Moallem Academy Web Implementation Log — Step 9 Update the lesson player to handle the new playback shape — Why this matters
+
+Playback rendering is now strategy-driven. The UI can cleanly branch between Cloudinary, Dailymotion, and unsupported providers.
+
+---
+
+TITLE: Moallem Academy Web Implementation Log — Step 10 Add localized playback strings for the new states — Files to update
+
+- `messages/en.json`
+- `messages/ar.json`
+
+TITLE: Moallem Academy Web Implementation Log — Step 10 Add localized playback strings for the new states — Code
+
+```json
+{
+  "Playback": {
+    "backToCourse": "Back to course",
+    "lockedMessage": "You do not have access to this lesson yet.",
+    "noMedia": "No video source is available for this lesson yet.",
+    "unsupportedExternal": "This external video provider is not supported for protected playback.",
+    "videoEnded": "This lesson video has ended.",
+    "replayVideo": "Replay video"
+  }
+}
+```
+
+```json
+{
+  "Playback": {
+    "backToCourse": "العودة إلى الدورة",
+    "lockedMessage": "ليس لديك صلاحية الوصول إلى هذا الدرس بعد.",
+    "noMedia": "لا يوجد مصدر فيديو متاح لهذا الدرس حالياً.",
+    "unsupportedExternal": "مزود الفيديو الخارجي هذا غير مدعوم للتشغيل المحمي.",
+    "videoEnded": "انتهى فيديو هذا الدرس.",
+    "replayVideo": "إعادة تشغيل الفيديو"
+  }
+}
+```
+
+TITLE: Moallem Academy Web Implementation Log — Step 10 Add localized playback strings for the new states — Why this matters
+
+Feature 14 adds several new truth-based playback states, so the student-facing UI copy must remain localized and consistent with the rest of the app.
+
+---
+
+TITLE: Moallem Academy Web Implementation Log — Step 11 Local verification used for this feature — Commands
+
+```bash
+npx prisma validate
+npx prisma generate
+npm run dev
+npx tsc --noEmit
+npm run build
+```
+
+TITLE: Moallem Academy Web Implementation Log — Step 11 Local verification used for this feature — What to verify
+
+- a Cloudinary-backed lesson still plays in the student watch page
+- a teacher-pasted Dailymotion lesson plays in the student watch page
+- a Dailymotion lesson does not show recommendation cards because the app replaces the player slightly before the true end with its own replay overlay
+- replay reloads the Dailymotion iframe correctly
+- unsupported external links do not silently fail; they render the unsupported-state UI instead
+- unauthorized students still see the locked-state UI
+- the watch page still uses the same lesson authorization rules as before
+- TypeScript passes and the app builds successfully
+
+---
+
+TITLE: Moallem Academy Web Implementation Log — Step 12 Commit Feature 14 — Command
+
+```bash
+git add .
+git commit -m "feat14 harden external video playback with dailymotion support"
+git push origin main
+```
+
+TITLE: Moallem Academy Web Implementation Log — Step 12 Commit Feature 14 — Why this matters
+
+This saves the final delivery-ready external-video hardening pass:
+- Dailymotion is now the supported protected external-video path
+- unsupported providers are handled honestly
+- the stable in-app playback path uses iframe embed
+- the app uses a realistic near-end overlay workaround to avoid unrelated recommendations under the current Dailymotion account constraints.[web:46][web:47][web:337]
+
+---
+
+TITLE: Moallem Academy Web Implementation Log — Feature 14 completion checklist
+
+- [x] Dailymotion established as the supported protected external-video provider
+- [x] Teacher-pasted Dailymotion links normalized into provider-aware playback data
+- [x] Playback resolution upgraded from raw URL behavior to strategy-based provider-aware behavior
+- [x] Watch page updated to pass the new `PlaybackResponse` shape
+- [x] Lesson player updated to render Cloudinary, Dailymotion, and unsupported states correctly
+- [x] Final Dailymotion player path uses stable iframe embed
+- [x] End-of-video recommendation behavior mitigated with a near-end app-owned overlay
+- [x] Unsupported providers surfaced explicitly instead of silently failing
+- [x] Existing authorization logic preserved
+- [x] Localization updated for new playback states
+
+---
+
+TITLE: Moallem Academy Web Implementation Log — Notes for future features
+
+- If Dailymotion Player-level configuration controls become available later, recommendation/autonext behavior can be improved further at the account/player layer.[web:337][web:338]
+- A future media-normalization pass may migrate or block old unsupported external-link records in the database.
+- If mobile requires the same playback behavior through HTTP routes, the final API parity pass in Feature 16 should verify that all necessary provider-aware playback logic is mirrored through `app/api/*`.
+
+
+

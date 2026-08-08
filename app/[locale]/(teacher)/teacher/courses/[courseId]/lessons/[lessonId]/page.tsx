@@ -44,6 +44,17 @@ export default async function TeacherLessonDetailsPage({ params }: Props) {
   if (!lesson) notFound();
 
   const previewUrl = lesson.media ? await getMediaPreviewUrl(lesson.id) : null;
+
+  const teacherPreviewUrl =
+    previewUrl?.strategy === "cloudinary"
+      ? previewUrl.url
+      : previewUrl?.strategy === "native_video"
+      ? previewUrl.url
+      : previewUrl?.strategy === "dailymotion_embed"
+      ? process.env.NEXT_PUBLIC_DAILYMOTION_PLAYER_ID
+        ? `https://geo.dailymotion.com/player/${process.env.NEXT_PUBLIC_DAILYMOTION_PLAYER_ID}.html?video=${previewUrl.videoId}`
+        : `https://www.dailymotion.com/embed/video/${previewUrl.videoId}`
+      : null;
   const lessonTitle =
     locale === "ar" ? lesson.titleAr : lesson.titleEn ?? lesson.titleAr;
 
@@ -72,7 +83,7 @@ export default async function TeacherLessonDetailsPage({ params }: Props) {
               courseId={courseId}
               locale={locale}
               existingMedia={lesson.media ?? null}
-              previewUrl={previewUrl?.url ?? null}
+              previewUrl={teacherPreviewUrl}
             />
           </div>
         </SectionCard>

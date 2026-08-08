@@ -23,6 +23,8 @@ enum MediaProvider {
   cloudinary
   external_link
   backblaze_b2
+    dailymotion      
+
 }
 
 enum TeacherApprovalStatus {
@@ -133,7 +135,11 @@ model LessonMedia {
   cloudinaryPublicId     String? @map("cloudinary_public_id")
   cloudinaryResourceType String? @default("video") @map("cloudinary_resource_type")
 
-  // External link field
+  // Dailymotion-specific fields        
+  dailymotionVideoId String? @map("dailymotion_video_id")
+  dailymotionPrivateId String? @map("dailymotion_private_id")
+
+  // External link field (direct playable .mp4 / .webm only)
   externalUrl String? @map("external_url")
 
   // Shared metadata

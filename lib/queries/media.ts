@@ -3,70 +3,82 @@ import { cloudinary } from "@/lib/cloudinary";
 import { canAccessLesson, PlaybackAuthResult } from "@/lib/access/playback";
 import type { Profile } from "@/lib/generated/prisma";
 
-
 export async function getLessonMediaByLessonId(lessonId: string) {
   return prisma.lessonMedia.findUnique({ where: { lessonId } });
 }
-
+export type ResolvedPlayback =
+  | { strategy: "cloudinary"; url: string }
+  | {
+      strategy: "dailymotion_embed";
+      videoId: string;
+      durationSeconds?: number | null;
+    }
+  | { strategy: "native_video"; url: string }
+  | { strategy: "unsupported"; reason: string }
+  | null;
 /**
- * Returns a playback-safe media response for a lesson.
- * For Cloudinary assets: generates a signed delivery URL (short-lived).
- * For external links: returns the URL directly (lower trust, not owned).
- * Returns null if no media is attached.
- *
- * This is the ONLY function web/mobile should call before rendering a player.
- * Backend authorization (enrollment check) must happen BEFORE calling this.
+ * Resolves a stored LessonMedia record into a concrete playback strategy.
+ * This is the ONLY function that should produce playback data.
+ * Authorization must be checked BEFORE calling this.
  */
-export async function getProtectedPlaybackUrl(lessonId: string): Promise<{
-  type: "cloudinary" | "external_link";
-  url: string;
-  isOwned: boolean;
-} | null> {
+export async function getProtectedPlaybackUrl(
+  lessonId: string
+): Promise<ResolvedPlayback> {
   const media = await prisma.lessonMedia.findUnique({ where: { lessonId } });
   if (!media || !media.isReady) return null;
 
+
+  // ── Cloudinary uploaded video ─────────────────────────────────────────────
   if (media.provider === "cloudinary" && media.cloudinaryPublicId) {
-    // Generate a signed, time-limited URL (600 seconds = 10 min window)
-   const url = cloudinary.url(media.cloudinaryPublicId, {
-     resource_type:
-       (media.cloudinaryResourceType as "video" | "image" | "raw") ?? "video",
-     sign_url: true,
-     expires_at: Math.round(Date.now() / 1000) + 600,
-     type: "authenticated",
-     format: "mp4",
-   });
-    return { type: "cloudinary", url, isOwned: true };
+    const url = cloudinary.url(media.cloudinaryPublicId, {
+      resource_type:
+        (media.cloudinaryResourceType as "video" | "image" | "raw") ?? "video",
+      sign_url: true,
+      expires_at: Math.round(Date.now() / 1000) + 600,
+      type: "authenticated",
+      format: "mp4",
+    });
+
+    return { strategy: "cloudinary", url };
   }
 
+  // ── Dailymotion uploaded or linked video ──────────────────────────────────
+if (media.provider === "dailymotion") {
+  const playbackId =
+    media.dailymotionPrivateId?.trim() || media.dailymotionVideoId?.trim();
+
+  if (!playbackId) {
+    return { strategy: "unsupported", reason: "no_media" };
+  }
+
+  return {
+    strategy: "dailymotion_embed",
+    videoId: playbackId,
+    durationSeconds: media.durationSeconds ?? null,
+  };
+}
+  // ── Direct external media URL (.mp4 / .webm / .m3u8) ─────────────────────
   if (media.provider === "external_link" && media.externalUrl) {
-    return { type: "external_link", url: media.externalUrl, isOwned: false };
+    return { strategy: "native_video", url: media.externalUrl };
   }
 
-  return null;
+  return { strategy: "unsupported", reason: "unresolvable_source" };
 }
 
 export async function getMediaPreviewUrl(lessonId: string) {
   return getProtectedPlaybackUrl(lessonId);
 }
 
-
-
-
-
 export type PlaybackResponse =
   | {
       allowed: true;
-      type: "cloudinary" | "external_link";
-      url: string;
-      isOwned: boolean;
-      externalNotice: boolean;
+      resolved: ResolvedPlayback;
     }
   | { allowed: false; reason: string };
 
 /**
  * The single shared function for resolving lesson playback.
- * Checks access first, then returns media URL only if authorized.
- * Call this from both web Server Components AND Route Handlers (mobile).
+ * Checks access first, then returns resolved playback only if authorized.
  */
 export async function resolvePlaybackAccess(
   profile: Profile | null,
@@ -81,16 +93,10 @@ export async function resolvePlaybackAccess(
     return { allowed: false, reason: authResult.reason ?? "denied" };
   }
 
-  const media = await getProtectedPlaybackUrl(lessonId);
-  if (!media) {
+  const resolved = await getProtectedPlaybackUrl(lessonId);
+  if (!resolved) {
     return { allowed: false, reason: "no_media" };
   }
 
-  return {
-    allowed: true,
-    type: media.type,
-    url: media.url,
-    isOwned: media.isOwned,
-    externalNotice: !media.isOwned, // true for external links — UI should show honest notice
-  };
+  return { allowed: true, resolved };
 }

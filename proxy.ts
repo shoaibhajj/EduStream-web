@@ -21,12 +21,22 @@ const isProtectedRoute = createRouteMatcher([
   "/api/payment(.*)",
   "/api/teacher(.*)",
 ]);
-export default clerkMiddleware(async (auth, req: NextRequest) => {
-  // 1. Run next-intl locale routing first
-  const i18nResponse = handleI18nRouting(req);
-  if (i18nResponse.status !== 200) return i18nResponse;
 
-  // 2. Protect routes
+export default clerkMiddleware(async (auth, req: NextRequest) => {
+  const { pathname } = req.nextUrl;
+
+  // Never run locale middleware on API routes
+  if (pathname.startsWith("/api/")) {
+    if (isProtectedRoute(req)) {
+      await auth.protect();
+    }
+
+    return NextResponse.next();
+  }
+
+  // Run locale routing only for non-API app/page routes
+  const i18nResponse = handleI18nRouting(req);
+
   if (isProtectedRoute(req)) {
     await auth.protect();
   }
@@ -35,8 +45,5 @@ export default clerkMiddleware(async (auth, req: NextRequest) => {
 });
 
 export const config = {
-  matcher: [
-    "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
-    "/(api|trpc)(.*)",
-  ],
+  matcher: ["/((?!api|trpc|_next|_vercel|.*\\..*).*)", "/api/(.*)"],
 };
